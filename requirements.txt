@@ -1,0 +1,9 @@
+alpaca-py>=0.40
+PySide6>=6.7
+pandas>=2.2
+numpy>=1.26
+requests>=2.31
+feedparser>=6.0
+pyyaml>=6.0
+python-dotenv>=1.0
+tzdata>=2024.1

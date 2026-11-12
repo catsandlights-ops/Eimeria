@@ -1,0 +1,14 @@
+.venv/
+.env
+trader.db
+logs/
+settings.yaml
+build/
+dist/
+*.spec
+__pycache__/
+.pytest_cache/
+cache/
+backups/
+updates/
+.selftest_write

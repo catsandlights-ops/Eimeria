@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0",
+  "tag": "v0.1.0",
+  "date": "2026-11-12",
+  "notes": [
+    "First Eimeria release, with built-in updates",
+    "Swing trading on large insider purchases, optional day trading, crash protection, backtesting, AI test, strategy health monitor and self-test"
+  ]
+}
