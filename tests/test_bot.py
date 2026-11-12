@@ -1119,3 +1119,47 @@ def test_no_index_purchases_after_kill_switch(journal):
     sw.invest_idle()
     sw._buy_inverse_with_spare()
     assert bought == []
+
+
+def test_commit_based_updates(tmp_path, monkeypatch):
+    import io
+    import zipfile
+    from app import updater
+    from app.updater import Updater, write_manifest
+    sha = "0396af792ee5ade53bb36bcbd6e34f7b214e83b2"
+    rel = tmp_path / "rel"
+    _make_app(rel, "9.1.0", {"app/engine.py": "new"})
+    write_manifest(rel)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for p in rel.rglob("*"):
+            if p.is_file():
+                z.writestr(f"Eimeria-{sha}/{p.relative_to(rel).as_posix()}", p.read_bytes())
+    urls = []
+
+    class R:
+        def __init__(self, js=None, body=b""):
+            self.status_code, self._js, self.content = 200, js, body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._js
+    info = {"version": "9.1.0", "commit": sha, "date": "2026-11-13", "notes": ["x"]}
+
+    def fake_get(url, **k):
+        urls.append(url)
+        return R(js=info) if url.endswith("update.json") else R(body=buf.getvalue())
+    monkeypatch.setattr(updater.requests, "get", fake_get)
+    up = Updater({"updates": {"repo": "catsandlights-ops/Eimeria", "branch": "claude/releases"}})
+    assert up.check()["version"] == "9.1.0"
+    assert urls[0] == "https://raw.githubusercontent.com/catsandlights-ops/Eimeria/refs/heads/claude/releases/update.json"
+    staging = up.download(info)
+    assert urls[-1] == f"https://github.com/catsandlights-ops/Eimeria/archive/{sha}.zip"
+    assert (staging / "app" / "engine.py").read_text() == "new"
+    with pytest.raises(ValueError, match="advertised"):                 # pointer to the wrong version
+        up.download({**info, "version": "9.2.0"})
+    info.update(commit="not-a-commit")
+    with pytest.raises(ValueError, match="commit"):
+        up.check()

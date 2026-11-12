@@ -154,7 +154,7 @@ DEFAULTS: dict = {
         "insider": {"min_value": 1_000_000, "min_insiders": 1, "require_ceo_cfo": False},
     },
     # Updates are published to this GitHub repository (update.json + version tags).
-    "updates": {"repo": "catsandlights-ops/eimeria", "branch": "main", "check_on_start": True},
+    "updates": {"repo": "catsandlights-ops/Eimeria", "branch": "claude/releases", "check_on_start": True},
     # Real-money trading stays locked until the bot has shown an edge after costs:
     # enough profitable paper trades AND a statistically meaningful edge in recent scans.
     "edge_gate": {

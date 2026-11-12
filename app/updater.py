@@ -1,8 +1,10 @@
 """Update checker and installer.
 
 How updates are published (see tools/make_release.py):
-  - The GitHub repo's main branch has `update.json`: {"version", "tag", "date", "notes": [...]}
-  - Each version is a git tag (e.g. v1.1.0). GitHub serves every tag as a zip archive.
+  - The GitHub repo's release branch (default `claude/releases`) has `update.json`:
+    {"version", "commit", "date", "notes": [...]}  ("tag" is also accepted instead of "commit").
+  - "commit" is the exact git commit of that version. GitHub serves any commit as a zip archive,
+    and a commit ID is a fingerprint of the whole version: it can't be changed after the fact.
   - Every release contains MANIFEST.sha256: a fingerprint of every file. After downloading, each file
     is checked against it, so a damaged, incomplete or tampered download is rejected.
 
@@ -40,6 +42,8 @@ PROTECTED = {"settings.yaml", ".env", "trader.db", "trader.db-journal", "cache",
              "venv", "updates", ".selftest_write", "dist", "build", "__pycache__", ".git", ".pytest_cache"}
 MANIFEST = "MANIFEST.sha256"
 TAG_PATTERN = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")
+COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+POINTER_FILES = {"update.json"}             # changes after a release is cut, so not in the fingerprint list
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024        # a release is ~0.5 MB; refuse anything absurd
 MAX_UNPACKED_BYTES = 200 * 1024 * 1024       # guards against "zip bombs"
 MAX_FILES = 5000
@@ -73,10 +77,22 @@ def app_files(root: Path) -> list[Path]:
         rel = p.relative_to(root)
         if rel.parts[0] in PROTECTED or "__pycache__" in rel.parts or p.is_dir():
             continue
-        if rel.name == MANIFEST or rel.suffix in (".pyc", ".db"):
+        if rel.name == MANIFEST or rel.suffix in (".pyc", ".db") or rel.as_posix() in POINTER_FILES:
             continue
         out.append(rel)
     return out
+
+
+def archive_ref(info: dict) -> str:
+    """The git ref to download for an update.json entry: a commit ID (preferred) or a version tag."""
+    commit, tag = str(info.get("commit", "")), str(info.get("tag", ""))
+    if commit:
+        if not COMMIT_PATTERN.match(commit):
+            raise ValueError(f"update.json has an invalid commit id: {commit!r}")
+        return commit
+    if TAG_PATTERN.match(tag) and tag.lstrip("v") == str(info.get("version", "")).lstrip("v"):
+        return f"refs/tags/{tag}"
+    raise ValueError(f"update.json has no valid commit or version tag ({tag!r})")
 
 
 def write_manifest(root: Path) -> Path:
@@ -118,26 +134,25 @@ class Updater:
         """Returns the update info if a newer version is published, else None."""
         if not self.repo:
             return None
-        url = f"https://raw.githubusercontent.com/{self.repo}/{self.cfg.get('branch', 'main')}/update.json"
+        branch = self.cfg.get("branch", "claude/releases")
+        url = f"https://raw.githubusercontent.com/{self.repo}/refs/heads/{branch}/update.json"
         r = requests.get(url, timeout=20, headers={"Cache-Control": "no-cache"})
         if r.status_code == 404:
             return None                      # nothing published yet
         r.raise_for_status()
         info = r.json()
-        if not isinstance(info, dict) or "version" not in info or "tag" not in info:
+        if not isinstance(info, dict) or "version" not in info:
             raise ValueError("update.json is malformed")
-        if not TAG_PATTERN.match(str(info["tag"])) or info["tag"].lstrip("v") != str(info["version"]).lstrip("v"):
-            raise ValueError(f"update.json has an invalid version tag: {info['tag']!r}")
+        if not re.match(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$", str(info["version"])):
+            raise ValueError(f"update.json has an invalid version: {info['version']!r}")
+        archive_ref(info)                                 # raises if neither commit nor tag is valid
         if not isinstance(info.get("notes", []), list):
             raise ValueError("update.json notes must be a list")
         return info if is_newer(info["version"]) else None
 
     def download(self, info: dict, progress=lambda m: None) -> Path:
         """Download and verify a release. Returns the staging folder containing the new app files."""
-        tag = info["tag"]
-        if not TAG_PATTERN.match(str(tag)):
-            raise ValueError(f"Invalid version tag: {tag!r}")
-        url = f"https://github.com/{self.repo}/archive/refs/tags/{tag}.zip"
+        url = f"https://github.com/{self.repo}/archive/{archive_ref(info)}.zip"
         progress(f"Downloading Eimeria {info['version']}...")
         r = requests.get(url, timeout=180)
         r.raise_for_status()
@@ -159,6 +174,9 @@ class Updater:
         staging = tops[0]
         progress("Verifying files...")
         problems = verify_manifest(staging)
+        got = _read_version(staging)
+        if got != str(info["version"]):
+            problems.append(f"The download is version {got}, but version {info['version']} was advertised.")
         if problems:
             shutil.rmtree(staging_root, ignore_errors=True)
             raise ValueError("The download failed verification and was NOT installed:\n" + "\n".join(problems[:10]))
@@ -186,6 +204,12 @@ class Updater:
         self.launch_installer(backup, restart=True)
 
 
+def _read_version(root: Path) -> str:
+    m = re.search(r'VERSION = "([^"]+)"', (root / "app" / "version.py").read_text(encoding="utf-8")) \
+        if (root / "app" / "version.py").exists() else None
+    return m.group(1) if m else "unknown"
+
+
 def python_for_helper() -> str:
     """The console Python next to the running one (pythonw has no console; either works for the helper)."""
     exe = Path(sys.executable)
@@ -204,8 +228,10 @@ def _pid() -> int:
     return os.getpid()
 
 
-def write_update_json(root: Path, version: str, notes: list[str], date_str: str) -> Path:
+def write_update_json(root: Path, version: str, notes: list[str], date_str: str, commit: str) -> Path:
+    if not COMMIT_PATTERN.match(commit):
+        raise ValueError(f"not a full commit id: {commit!r}")
     p = root / "update.json"
-    p.write_text(json.dumps({"version": version, "tag": f"v{version}", "date": date_str, "notes": notes},
+    p.write_text(json.dumps({"version": version, "commit": commit, "date": date_str, "notes": notes},
                             indent=2) + "\n", encoding="utf-8")
     return p

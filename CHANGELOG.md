@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2 (2026-11-12)
+- Updates are now published on GitHub (repository catsandlights-ops/Eimeria) and downloaded by exact commit, with an extra check that the downloaded version matches
+- Includes all 0.1.1 security, safety and reliability fixes
+
 ## 0.1.1 (2026-11-12)
 - Security: hardened update installer (size limits, strict version tags, never touches files outside the app folder), hardened parsing of SEC filings, no pickle files
 - Safety: kill switch now also stops orders that were mid-flight, no duplicate orders while an order is pending, unfilled remainders of partly filled orders are cancelled
