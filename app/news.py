@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import feedparser
+import requests
 
 from .ai_schemas import SENTIMENT
 from .llm import LocalLLM
@@ -71,7 +72,11 @@ class NewsReader:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         for url in self.cfg.get("rss_feeds", []):
             try:
-                feed = feedparser.parse(url, agent="Mozilla/5.0 (Eimeria desktop app)")
+                resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0 (Eimeria desktop app)"})
+                resp.raise_for_status()
+                if len(resp.content) > 5_000_000:
+                    raise ValueError("feed too large")
+                feed = feedparser.parse(resp.content)
                 for e in feed.entries[:30]:
                     t = e.get("published_parsed") or e.get("updated_parsed")
                     when = datetime(*t[:6], tzinfo=timezone.utc) if t else datetime.now(timezone.utc)
@@ -110,7 +115,7 @@ class NewsReader:
             return {"score": 0.0, "summary": f"Only promotional/hype articles ({hype_count}); ignored."}
         text = "\n".join(f"- [{_age(h['time'])}] {clean_text(h['headline'], 160)}. {clean_text(h['summary'])}"
                          for h in real)
-        h = hashlib.md5(text.encode()).hexdigest()
+        h = hashlib.md5(text.encode(), usedforsecurity=False).hexdigest()  # cache key only
         cached = self._cache.get(symbol)
         if cached and cached[1] == h and time.time() - cached[0] < 1800:
             return cached[2]

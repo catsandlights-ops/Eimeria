@@ -218,7 +218,7 @@ def config_log(text: str):
         config.LOG_DIR.mkdir(exist_ok=True)
         with open(config.LOG_DIR / "selftest_errors.log", "a", encoding="utf-8") as f:
             f.write(f"--- {datetime.now()}\n{text}\n")
-    except Exception:
+    except Exception:  # nosec B110 - best-effort, must never raise
         pass
 
 

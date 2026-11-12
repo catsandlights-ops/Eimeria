@@ -15,7 +15,7 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - used with fixed argument lists, never a shell
 import sys
 import time
 from datetime import datetime
@@ -43,6 +43,12 @@ def manifest_files(root: Path) -> set[str]:
     return {line.split("  ", 1)[1] for line in m.read_text(encoding="utf-8").splitlines() if "  " in line}
 
 
+def safe_rel(rel: str) -> bool:
+    """A relative path that stays inside the app folder (no '..', no drive letters, not absolute)."""
+    p = Path(rel.replace("\\", "/"))
+    return bool(rel) and not p.is_absolute() and ".." not in p.parts and ":" not in rel
+
+
 def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else ""
 
@@ -52,7 +58,7 @@ def read_version(root: Path) -> str:
         for line in (root / "app" / "version.py").read_text(encoding="utf-8").splitlines():
             if line.startswith("VERSION"):
                 return line.split("=", 1)[1].strip().strip("\"'")
-    except Exception:
+    except Exception:  # nosec B110 - best-effort, must never raise
         pass
     return "unknown"
 
@@ -103,13 +109,16 @@ def install(source: Path, target: Path, from_version: str, log) -> str:
         copy_tree(source, target, new_files)
         new_set = {p.as_posix() for p in new_files}
         for rel in sorted(old_listed - new_set):           # files the old version had, the new one doesn't
+            if not safe_rel(rel):
+                log(f"Skipped unsafe path in old file list: {rel!r}")
+                continue
             f = target / rel
             if f.exists() and Path(rel).parts[0] not in PROTECTED:
                 f.unlink()
                 log(f"Removed old file {rel}")
         if sha(target / "requirements.txt") != req_before:
             log("requirements.txt changed: installing Python packages...")
-            r = subprocess.run([python_in(target, False), "-m", "pip", "install", "-r",
+            r = subprocess.run([python_in(target, False), "-m", "pip", "install", "-r",  # nosec B603 - fixed program and arguments (our own Python + script)
                                 str(target / "requirements.txt")], capture_output=True, text=True, timeout=1800)
             log(r.stdout[-3000:] + r.stderr[-3000:])
             if r.returncode != 0:
@@ -157,7 +166,7 @@ def main(argv=None) -> int:
         flags = 0
         if sys.platform == "win32":
             flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        subprocess.Popen([python_in(target, True), str(target / "run_app.py")], cwd=str(target),
+        subprocess.Popen([python_in(target, True), str(target / "run_app.py")], cwd=str(target),  # nosec B603 - fixed program and arguments (our own Python + script)
                          creationflags=flags, close_fds=True)
     return 0 if result["ok"] else 1
 

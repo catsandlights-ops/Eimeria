@@ -70,9 +70,10 @@ class UpdateDialog(QDialog):
         self.setStyleSheet(STYLE)
         self.resize(640, 420)
         lay = QVBoxLayout(self)
-        notes = "".join(f"<li>{n}</li>" for n in info.get("notes", []))
-        text = QLabel(f"<h3>Eimeria {info['version']} is available</h3>You have {VERSION}. Released "
-                      f"{info.get('date', '')}.<br><br><b>What's new:</b><ul>{notes}</ul>"
+        from html import escape
+        notes = "".join(f"<li>{escape(str(n))}</li>" for n in info.get("notes", []))
+        text = QLabel(f"<h3>Eimeria {escape(str(info['version']))} is available</h3>You have {VERSION}. Released "
+                      f"{escape(str(info.get('date', '')))}.<br><br><b>What's new:</b><ul>{notes}</ul>"
                       "Your settings, keys, trade history and caches are kept. The current version is backed up "
                       "first and restored automatically if anything goes wrong.")
         text.setWordWrap(True)

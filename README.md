@@ -344,8 +344,41 @@ The **Learning** tab shows progress on both. Paper trading continues normally wh
 | `app/gui/` | The window |
 
 **Optional extras:**
-- `run_tests.bat` runs the 40 automatic tests (fake broker and fake AI, no money involved).
+- `run_tests.bat` runs the 48 automatic tests (fake broker and fake AI, no money involved).
 - `build_exe.bat` builds a standalone `Eimeria.exe` in `dist\Eimeria`. Copy your `settings.yaml` and `.env` next to the exe.
+
+## Security and reliability
+
+**Your keys and data:**
+- Alpaca keys are stored only in `.env`, on your PC. They're never written to logs, the self-test report, or the code repository, and only ever sent to Alpaca.
+- Your SEC contact (name and email) is only sent to sec.gov, which requires it.
+- Phone alerts, if you set them up, go through the public ntfy.sh service. Anyone who knows your topic name can read them, so use a long random one.
+
+**What's checked:**
+- **Code scanning** (bandit): no open findings. Each remaining low-risk spot was reviewed and marked with the reason.
+- **Library audit** (pip-audit): every library Eimeria uses was checked against the public vulnerability database; none had known problems.
+- **Downloaded data is treated as untrusted:**
+  - SEC filings are read with a hardened XML parser;
+  - news text is cleaned before the AI sees it, and the AI's answers must match an exact format;
+  - news-feed downloads have time and size limits.
+- **Updates:**
+  - files are checked against fingerprints;
+  - version tags must look like `v1.2.3`;
+  - downloads are size-limited (no "zip bombs");
+  - nothing can be written or deleted outside the Eimeria folder;
+  - user data is never touched;
+  - automatic rollback if anything fails;
+  - installed only when you click Install.
+- **Crashes:** they're recorded in `logs\crash.log` and shown on screen. A damaged `settings.yaml` is set aside, and Eimeria starts with default settings instead of failing.
+
+**Your GitHub account is the key to updates.** The fingerprint check catches damaged downloads, but whoever controls the `catsandlights-ops` GitHub account can publish updates. **Turn on two-factor authentication** on GitHub (Settings → Password and authentication), and only click Install for updates you expect.
+
+**Stress testing.** `python -m tests.stress_sim --days 30 --faults 0.05` runs the real trading engine through simulated weeks against a simulated broker and market. 5% of broker and AI calls fail at random, and there's a crash day, an early-close day and an optional kill switch. After every simulated minute it checks the safety rules:
+- day trades are never held overnight;
+- position-count, position-size and trades-per-day limits hold;
+- every position gets a stop-loss within 10 minutes;
+- nothing is traded after the kill switch;
+- every closed trade has a valid result.
 
 ## Troubleshooting
 

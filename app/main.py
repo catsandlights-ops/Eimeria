@@ -51,11 +51,46 @@ def setup_logging():
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 
+def install_crash_handlers():
+    """The app runs without a console window, so unexpected errors must be written to a file
+    (logs/crash.log) and shown, instead of the app silently disappearing."""
+    import threading
+    import traceback
+    from datetime import datetime
+
+    def write(kind, exc_type, exc, tb):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+        try:
+            config.LOG_DIR.mkdir(exist_ok=True)
+            with open(config.LOG_DIR / "crash.log", "a", encoding="utf-8") as f:
+                f.write(f"--- {datetime.now():%Y-%m-%d %H:%M:%S} {kind}\n{text}\n")
+        except Exception:  # nosec B110 - best-effort, must never raise
+            pass
+        logging.getLogger("crash").error("%s: %s", kind, text)
+        return text
+
+    def on_error(exc_type, exc, tb):
+        write("unexpected error", exc_type, exc, tb)
+        try:
+            from PySide6.QtWidgets import QApplication, QMessageBox
+            if QApplication.instance():
+                QMessageBox.critical(None, "Eimeria: unexpected error",
+                                     f"{exc_type.__name__}: {exc}\n\nDetails were saved to logs\\crash.log. "
+                                     "The bot keeps running if it can; restart Eimeria if something looks wrong.")
+        except Exception:  # nosec B110 - best-effort, must never raise
+            pass
+
+    sys.excepthook = on_error
+    threading.excepthook = lambda a: write(f"error in background thread {a.thread.name if a.thread else ''}",
+                                           a.exc_type, a.exc_value, a.exc_traceback)
+
+
 def main():
     from PySide6.QtWidgets import QApplication, QMessageBox
 
     from .gui.main_window import MainWindow
 
+    install_crash_handlers()
     copied = config.migrate_from_old_folder()
     setup_logging()
     app = QApplication(sys.argv)
@@ -65,6 +100,8 @@ def main():
                                 "Your settings, keys and trade history were copied from your old app folder:\n\n"
                                 + "\n".join(copied) + "\n\nThe old folder wasn't changed; you can delete it later.")
     ctx = AppContext()
+    for problem in config.SETTINGS_PROBLEM:
+        QMessageBox.warning(None, "Eimeria: settings problem", problem)
     if not ctx.journal.get("accepted_disclaimer"):
         if QMessageBox.question(None, "Eimeria: risk notice", DISCLAIMER) != QMessageBox.Yes:
             return 0

@@ -107,9 +107,10 @@ class AITab(QWidget):
             installed = ", ".join(e.llm.installed_models()) or "none"
         except Exception:
             installed = "(Ollama not reachable)"
+        from html import escape
         summary = e.llm.summary() if hasattr(e.llm, "summary") else ""
-        self.model_lbl.setText(f"<b>{'Ready' if ok else 'Not ready'}</b>: {msg}<br>Installed models: {installed}"
-                               f"<br>This session: {summary}")
+        self.model_lbl.setText(f"<b>{'Ready' if ok else 'Not ready'}</b>: {escape(msg)}<br>Installed models: "
+                               f"{escape(installed)}<br>This session: {escape(summary)}")
 
     def speed_test(self):
         e = self.win.engine

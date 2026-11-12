@@ -25,6 +25,8 @@ ENV_PATH = BASE_DIR / ".env"
 DB_PATH = BASE_DIR / "trader.db"
 LOG_DIR = BASE_DIR / "logs"
 
+SETTINGS_PROBLEM: list[str] = []          # filled if settings.yaml was damaged (shown at startup)
+
 DEFAULTS: dict = {
     # "paper" = fake money (safe). "live" = REAL money. Start with paper!
     "mode": "paper",
@@ -68,7 +70,6 @@ DEFAULTS: dict = {
         "rss_feeds": [
             "https://feeds.content.dowjones.io/public/rss/mw_topstories",
             "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=100003114",
-            "https://finance.yahoo.com/news/rssindex",
         ],
         "lookback_hours": 18,
         "max_headlines_per_symbol": 8,
@@ -226,8 +227,19 @@ def load_settings() -> dict:
     """Read settings.yaml merged over defaults. Creates the file on first run."""
     user = {}
     if SETTINGS_PATH.exists():
-        with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
-            user = yaml.safe_load(f) or {}
+        try:
+            with open(SETTINGS_PATH, "r", encoding="utf-8") as f:
+                user = yaml.safe_load(f) or {}
+            if not isinstance(user, dict):
+                raise ValueError("settings.yaml doesn't contain settings")
+        except Exception as e:
+            # A damaged settings file must not stop the app: keep it aside and start from defaults
+            from datetime import datetime
+            broken = SETTINGS_PATH.with_name(f"settings.broken-{datetime.now():%Y%m%d-%H%M%S}.yaml")
+            SETTINGS_PATH.rename(broken)
+            SETTINGS_PROBLEM.append(f"settings.yaml couldn't be read ({e}). It was renamed to {broken.name} and "
+                                    f"default settings are being used. Your keys (.env) and trades are unaffected.")
+            user = {}
     settings = _deep_merge(DEFAULTS, user)
     if not SETTINGS_PATH.exists():
         save_settings(settings)

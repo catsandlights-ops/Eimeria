@@ -69,6 +69,7 @@ class Engine:
         self._stop = threading.Event()
         self._task_lock = threading.Lock()
         self._manage_lock = threading.Lock()
+        self._protect_lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._last_scan = 0.0
         self._last_insider = 0.0
@@ -107,10 +108,23 @@ class Engine:
             self.broker.close_all()
             self._mark_open_trades("kill switch")
             self._log("KILL SWITCH: all orders cancelled and all positions closed.")
+            # A scan running in the background at this moment might still send an order it had already
+            # approved: sweep again a few seconds later to catch anything in flight.
+            threading.Thread(target=self._second_sweep, daemon=True).start()
             self.alerts.send("Kill switch used", "All orders cancelled and all positions closed.", "problem", True)
         except Exception as e:
             self._log(f"Kill switch error: {e}. CHECK YOUR BROKER ACCOUNT NOW.", level=logging.ERROR)
             self.alerts.send("KILL SWITCH FAILED", f"{e}. Check your broker account now!", "problem", True)
+
+    def _second_sweep(self):
+        time.sleep(3)
+        try:
+            if self.broker.positions() or self.broker.open_orders():
+                self.broker.close_all()
+                self._log("KILL SWITCH: second sweep closed an order/position that was in flight.",
+                          level=logging.WARNING)
+        except Exception as e:
+            self._log(f"Kill switch second sweep failed: {e}. CHECK YOUR BROKER ACCOUNT.", level=logging.ERROR)
 
     def run_task(self, name: str):
         """Run a task now from a GUI button (in the background)."""
@@ -198,14 +212,16 @@ class Engine:
             sw = self.s["swing"]
             if sw["enabled"]:
                 hhmm = now.strftime("%H:%M")
+                # On early-close days (e.g. 1 PM) the 3:45/3:50 times never come: also act shortly before the close
+                near_close = mins_to_close <= 15
                 if hhmm >= sw["entry_time"] and self.journal.get("swing_entered") != today:
                     self.journal.set("swing_entered", today)
                     self._run_locked(self.swing.enter)
-                if hhmm >= sw["exit_time"] and self.journal.get("swing_exited") != today:
+                if (hhmm >= sw["exit_time"] or near_close) and self.journal.get("swing_exited") != today:
                     self.journal.set("swing_exited", today)
                     self._run_locked(self.swing.exits)
                 if (sw.get("idle_cash_in_index") or sw.get("crash_protection") == "short") \
-                        and hhmm >= sw["index_time"] \
+                        and (hhmm >= sw["index_time"] or mins_to_close <= 10) \
                         and self.journal.get("index_invested") != today:
                     self.journal.set("index_invested", today)
                     self._run_locked(self.swing.invest_idle)
@@ -256,6 +272,12 @@ class Engine:
         """Mark journal trades closed once the broker no longer holds them."""
         held = {p["symbol"] for p in positions}
         for t in self.journal.open_trades():
+            age = (datetime.now(timezone.utc) - datetime.fromisoformat(t["entry_time"])).total_seconds()
+            timeout = 600 if t["style"] == "swing" else self.s["risk"]["entry_timeout_seconds"]
+            if t["symbol"] in held and timeout < age < 3600 + timeout and t["order_id"]:
+                self._finish_partial_fill(t, positions)
+            if t["symbol"] in held and age > 3600 + timeout:
+                continue           # filled and held for over an hour: nothing to check (saves API calls)
             fill = self.broker.order_fill_price(t["order_id"]) if t["order_id"] else None
             if fill and abs(fill - (t["entry_price"] or 0)) > 1e-9 and not t["partial_taken"]:
                 # Record the real fill price (the stop at the broker stays where it was placed)
@@ -265,8 +287,6 @@ class Engine:
                 continue
             entry_time = datetime.fromisoformat(t["entry_time"])
             if fill is None:
-                age = (datetime.now(timezone.utc) - entry_time).total_seconds()
-                timeout = 600 if t["style"] == "swing" else self.s["risk"]["entry_timeout_seconds"]
                 if age > timeout:
                     self.broker.cancel_order(t["order_id"])
                     if self.broker.order_fill_price(t["order_id"]) is None:
@@ -284,6 +304,22 @@ class Engine:
                 self._log(msg)
                 self.alerts.send(f"{t['symbol']} closed: {pnl:+.2f} USD", msg, "trade")
                 self.emit("journal", None)
+
+    def _finish_partial_fill(self, t: dict, positions: list[dict]):
+        """After the fill window: cancel any unfilled remainder of the entry (it's good-till-cancelled and could
+        otherwise fill days later at a stale price) and record the share count actually held."""
+        try:
+            status = self.broker.order_status(t["order_id"])
+        except Exception:
+            return
+        if status in ("partially_filled", "new", "accepted", "pending_new"):
+            self.broker.cancel_order(t["order_id"])
+            self._log(f"{t['symbol']}: entry only partly filled; cancelled the rest of the order.")
+        pos = next((p for p in positions if p["symbol"] == t["symbol"]), None)
+        if pos and pos["qty"] != t["qty"] and not t["partial_taken"]:
+            q = int(pos["qty"])
+            self.journal.update_trade(t["id"], qty=q)
+            self.journal._exec("UPDATE trades SET initial_qty=? WHERE id=?", (q, t["id"]))
 
     @staticmethod
     def _guess_exit_reason(t: dict, exit_price: float) -> str:
@@ -396,6 +432,14 @@ class Engine:
         (e.g. after a crash, a failed order, or positions opened outside the bot)."""
         if not force and time.time() - self._last_protect < 60:
             return
+        if not self._protect_lock.acquire(blocking=False):
+            return                           # already running (e.g. the button and the background loop)
+        try:
+            self._check_protection()
+        finally:
+            self._protect_lock.release()
+
+    def _check_protection(self):
         self._last_protect = time.time()
         positions = self.broker.positions()
         if not positions:
@@ -634,8 +678,8 @@ Return JSON: {{"action": "buy" | "short" | "skip", "confidence": 0.0-1.0, "reaso
             return
         account = self.broker.account()
         positions = self.broker.positions()
-        if any(p["symbol"] == sym for p in positions):
-            self._log(f"{sym}: skipped, already held.")
+        if any(p["symbol"] == sym for p in positions) or any(t["symbol"] == sym for t in self.journal.open_trades()):
+            self._log(f"{sym}: skipped, already held or an order is pending.")
             return
         swing_syms = {t["symbol"] for t in self.journal.open_trades() if t["style"] == "swing"}
         positions = [p for p in positions if p["symbol"] not in swing_syms]   # swing has its own limits
@@ -667,6 +711,9 @@ Return JSON: {{"action": "buy" | "short" | "skip", "confidence": 0.0-1.0, "reaso
         qty = self.risk.size_position(limit, stop, account)
         if qty < 1:
             self._log(f"{sym}: position size rounds to 0 shares, skipped.")
+            return
+        if self.risk.halted_reason:          # re-check right before sending (kill switch may have just been used)
+            self._log(f"{sym}: not sent ({self.risk.halted_reason})")
             return
         try:
             order_id = self.broker.submit_bracket(sym, qty, side, stop, target, limit_price=limit)
@@ -764,6 +811,7 @@ Return JSON: {{"action": "buy" | "short" | "skip", "confidence": 0.0-1.0, "reaso
                      f"ALL TIME: {st['trades']} trades, win rate {st['win_rate']:.0%}, P&L {st['total_pnl']:+,.2f} USD")
         # 3. Self-improvement
         try:
+            self.journal.prune_observations()
             self.fill_observations()
         except Exception as e:
             log.warning("Could not fill observations: %s", e)

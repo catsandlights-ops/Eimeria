@@ -885,7 +885,6 @@ def test_apply_update_keeps_user_data_and_rolls_back(tmp_path, monkeypatch):
 
 def test_updater_check_and_download(tmp_path, monkeypatch):
     import io
-    import json as _json
     import zipfile
     from app import updater
     from app.updater import Updater, write_manifest
@@ -925,5 +924,198 @@ def test_updater_check_and_download(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="failed verification"):
         up.download(info)
     from app.version import VERSION
-    monkeypatch.setattr(updater.requests, "get", lambda url, **k: R(js={**info, "version": VERSION}))
+    monkeypatch.setattr(updater.requests, "get", lambda url, **k: R(js={**info, "version": VERSION,
+                                                                       "tag": f"v{VERSION}"}))
     assert up.check() is None                                 # same version as installed: nothing offered
+
+
+
+def test_updater_hardening(tmp_path, monkeypatch):
+    import io
+    import zipfile
+    from app import apply_update, updater
+    from app.updater import Updater
+
+    class R:
+        def __init__(self, js=None, body=b""):
+            self.status_code, self._js, self.content = 200, js, body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._js
+    up = Updater({"updates": {"repo": "catsandlights-ops/eimeria"}})
+    for bad in ({"version": "9.0.0", "tag": "v9.0.0/../../evil"}, {"version": "9.0.0", "tag": "v8.0.0"},
+                {"version": "9.0.0", "tag": "v9.0.0", "notes": "not a list"}, ["not", "a", "dict"]):
+        monkeypatch.setattr(updater.requests, "get", lambda url, **k: R(js=bad))
+        with pytest.raises(ValueError):
+            up.check()
+    # A "zip bomb" (tiny download, huge when unpacked) is refused before anything is written
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("eimeria-9.0.0/big.bin", b"\0" * (updater.MAX_UNPACKED_BYTES + 1))
+    monkeypatch.setattr(updater.requests, "get", lambda url, **k: R(body=buf.getvalue()))
+    with pytest.raises(ValueError, match="large"):
+        up.download({"version": "9.0.0", "tag": "v9.0.0"})
+    # Paths escaping the folder are refused, including Windows drive letters
+    for evil in ("../outside.py", "C:/Windows/evil.py"):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr(f"eimeria-9.0.0/{evil}" if evil.startswith("..") else evil, b"x")
+        monkeypatch.setattr(updater.requests, "get", lambda url, **k: R(body=buf.getvalue()))
+        with pytest.raises(ValueError):
+            up.download({"version": "9.0.0", "tag": "v9.0.0"})
+    # The installer never deletes outside the app folder, even if an old file list says so
+    assert apply_update.safe_rel("app/x.py") and not apply_update.safe_rel("../x.py")
+    assert not apply_update.safe_rel("C:/Windows/x.py") and not apply_update.safe_rel("/etc/passwd")
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    target, source = tmp_path / "eimeria", tmp_path / "new"
+    _make_app(target, "0.1.0", {"app/a.py": "a"})
+    (target / "MANIFEST.sha256").write_text("0" * 64 + "  ../victim.txt\n" + "0" * 64 + "  app/a.py\n")
+    _make_app(source, "0.2.0", {"app/a.py": "b"})
+    assert apply_update.main(["--source", str(source), "--target", str(target)]) == 0
+    assert victim.read_text() == "keep me"
+
+
+def test_sec_history_parse_and_cache(tmp_path, monkeypatch):
+    import io
+    import zipfile
+    from datetime import date
+    from app import sec_history
+
+    def tsv(rows):
+        return "\n".join("\t".join(r) for r in rows) + "\n"
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("SUBMISSION.tsv", tsv([["ACCESSION_NUMBER", "FILING_DATE", "ISSUERTRADINGSYMBOL", "DOCUMENT_TYPE"],
+                                          ["a1", "05-FEB-2024", "abc", "4"], ["a2", "06-FEB-2024", "XYZ", "4"],
+                                          ["a3", "07-FEB-2024", "FUND", "4"]]))
+        z.writestr("NONDERIV_TRANS.tsv", tsv([["ACCESSION_NUMBER", "TRANS_CODE", "TRANS_SHARES", "TRANS_PRICEPERSHARE"],
+                                              ["a1", "P", "10000", "50"], ["a1", "P", "5000", "52"],
+                                              ["a2", "S", "100", "10"], ["a3", "P", "1000000", "20"]]))
+        z.writestr("REPORTINGOWNER.tsv", tsv([["ACCESSION_NUMBER", "RPTOWNERCIK", "RPTOWNERNAME",
+                                               "RPTOWNER_RELATIONSHIP", "RPTOWNER_TITLE"],
+                                              ["a1", "0001", "Doe Jane", "Officer", "CEO"],
+                                              ["a2", "0002", "Roe Rick", "Director", ""],
+                                              ["a3", "0003", "Big Fund LP", "TenPercentOwner", ""]]))
+
+    class R:
+        status_code, content = 200, buf.getvalue()
+
+        def raise_for_status(self):
+            pass
+    monkeypatch.setattr(sec_history.requests, "get", lambda *a, **k: R())
+    df = sec_history.load_quarter(2024, 1, tmp_path, "Test research@example.com")
+    assert list(df["symbol"]) == ["ABC"]                         # sale and 10%-owner fund excluded
+    row = df.iloc[0]
+    assert row["value"] == 10000 * 50 + 5000 * 52 and row["owner_id"] == "0001" and row["filed"] == date(2024, 2, 5)
+    assert (tmp_path / "insider_2024q1.csv.gz").exists()
+    monkeypatch.setattr(sec_history.requests, "get", lambda *a, **k: 1 / 0)    # must come from the cache now
+    cached = sec_history.load_quarter(2024, 1, tmp_path, "x")
+    assert cached.iloc[0]["owner_id"] == "0001" and cached.iloc[0]["filed"] == date(2024, 2, 5)
+    assert cached.iloc[0]["value"] == row["value"]
+
+
+def test_rss_feeds_have_timeouts_and_survive_errors(monkeypatch):
+    from datetime import timezone
+    from app import news as news_mod
+    calls = []
+    rss = (b"<?xml version='1.0'?><rss><channel><title>Wire</title><item><title>Fed holds rates steady</title>"
+           b"<pubDate>" + datetime.now(timezone.utc).strftime("%a, %d %b %Y %H:%M:%S +0000").encode() +
+           b"</pubDate></item></channel></rss>")
+
+    class R:
+        status_code, content = 200, rss
+
+        def raise_for_status(self):
+            pass
+
+    def fake_get(url, timeout=None, **k):
+        calls.append(timeout)
+        if "broken" in url:
+            raise TimeoutError("feed hung")
+        return R()
+    monkeypatch.setattr(news_mod.requests, "get", fake_get)
+    reader = news_mod.NewsReader(FakeBroker(), FakeLLM(), {**DEFAULTS["news"],
+                                 "rss_feeds": ["https://broken.example/rss", "https://ok.example/rss"]})
+    heads = reader.market_headlines()
+    assert all(t and t <= 30 for t in calls)                      # every feed request has a time limit
+    assert any(h["headline"] == "Fed holds rates steady" for h in heads)   # a broken feed doesn't stop the rest
+
+
+def test_partial_fill_remainder_is_cancelled(settings, journal):
+    broker = FakeBroker()
+    eng = engine(settings, journal, broker)
+    eng.scan()
+    t = journal.open_trades()[0]
+    broker.held[0]["qty"] = max(1, t["qty"] // 3)                 # only a third filled
+    broker.order_states = {t["order_id"]: "partially_filled"}
+    old = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+    journal._exec("UPDATE trades SET entry_time=? WHERE id=?", (old, t["id"]))
+    eng.refresh_account()
+    assert t["order_id"] in broker.cancelled                       # the unfilled rest won't fill later
+    t2 = journal.open_trades()[0]
+    assert t2["qty"] == broker.held[0]["qty"] and t2["initial_qty"] == broker.held[0]["qty"]
+
+
+def test_damaged_settings_file_does_not_stop_the_app(tmp_path, monkeypatch):
+    from app import config
+    monkeypatch.setattr(config, "SETTINGS_PATH", tmp_path / "settings.yaml")
+    monkeypatch.setattr(config, "SETTINGS_PROBLEM", [])
+    (tmp_path / "settings.yaml").write_text("mode: paper\n  watchlist: [AAPL\n: : broken")
+    s = config.load_settings()
+    assert s["mode"] == "paper" and s["swing"]["enabled"]           # defaults, app starts
+    assert config.SETTINGS_PROBLEM and list(tmp_path.glob("settings.broken-*.yaml"))
+
+
+def test_crash_handler_writes_log(tmp_path, monkeypatch):
+    import sys as _sys
+    from app import config, main
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path)
+    old_hook = _sys.excepthook
+    try:
+        main.install_crash_handlers()
+        try:
+            raise RuntimeError("boom")
+        except RuntimeError:
+            _sys.excepthook(*_sys.exc_info())
+    finally:
+        _sys.excepthook = old_hook
+    assert "RuntimeError: boom" in (tmp_path / "crash.log").read_text()
+
+
+def test_old_observations_are_pruned(journal):
+    journal.add_observations([{"symbol": "X", "price": 1, "scores": {}, "score": 0}] * 3)
+    old = (datetime.now(timezone.utc) - timedelta(days=400)).isoformat()
+    journal._exec("UPDATE observations SET ts=? WHERE id<=2", (old,))
+    assert journal.prune_observations() == 2 and journal.observation_count()[0] == 1
+
+
+def test_kill_switch_pressed_mid_scan_blocks_the_order(settings, journal):
+    broker = FakeBroker()
+    eng = engine(settings, journal, broker)
+    real = eng.risk.bracket_prices
+
+    def kill_now(*a, **k):                     # runs after the risk check, just before the order is sent
+        eng.risk.halted_reason = "Kill switch used. Restart the app to trade again."
+        return real(*a, **k)
+    eng.risk.bracket_prices = kill_now
+    eng.scan()
+    assert broker.orders == []
+
+
+def test_no_index_purchases_after_kill_switch(journal):
+    from app.swing_live import SwingTrader
+    s = swing_settings()
+    s["swing"].update(idle_cash_in_index=True, crash_protection="short")
+    broker = FakeBroker()
+    bought = []
+    broker.trade_notional = lambda sym, side, dollars: bought.append((sym, side)) or "n"
+    eng = engine(s, journal, broker)
+    eng.kill_switch()
+    sw = SwingTrader(eng)
+    sw.invest_idle()
+    sw._buy_inverse_with_spare()
+    assert bought == []

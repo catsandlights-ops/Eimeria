@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 import time
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET  # hardened XML parser for downloaded filings
 from datetime import date, timedelta
 
 import requests

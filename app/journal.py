@@ -131,9 +131,12 @@ class Journal:
 
     def update_trade(self, trade_id: int, **fields):
         allowed = {"qty", "current_stop", "best_price", "partial_taken", "exit_reason", "entry_price"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"update_trade: unknown field(s) {sorted(unknown)}")
         for k, v in fields.items():
-            if k in allowed:
-                self._exec(f"UPDATE trades SET {k}=? WHERE id=?", (v, trade_id))
+            if k in allowed:          # column names come only from this fixed list (never user input)
+                self._exec(f"UPDATE trades SET {k}=? WHERE id=?", (v, trade_id))  # nosec B608 - k is from a fixed allow-list
 
     def update_entry_price(self, trade_id: int, price: float):
         self._exec("UPDATE trades SET entry_price=? WHERE id=?", (price, trade_id))
@@ -252,6 +255,13 @@ class Journal:
     def learning_observations(self, since_iso: str) -> list[dict]:
         return self._all("SELECT ts, score, scores_json, fwd30, fwd60 FROM observations WHERE filled=1"
                          " AND fwd60 IS NOT NULL AND ts >= ?", (since_iso,))
+
+    def prune_observations(self, keep_days: int = 365) -> int:
+        """Shadow-learning data older than a year is never used; delete it so the database stays small."""
+        from datetime import timedelta
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=keep_days)).isoformat()
+        n = self._exec("DELETE FROM observations WHERE ts < ?", (cutoff,)).rowcount
+        return n
 
     def observation_count(self) -> tuple[int, int]:
         r = self._all("SELECT COUNT(*) AS n, SUM(filled) AS f FROM observations")[0]

@@ -174,6 +174,7 @@ class SwingTrader:
         account = e.broker.account()
         positions = e.broker.positions()
         held = {x["symbol"] for x in positions}
+        held |= {t["symbol"] for t in e.journal.open_trades()}     # includes orders not filled yet: never double up
         swing_open = [t for t in e.journal.open_trades() if t["style"] == "swing"]
         slots = cfg["max_positions"] - len(swing_open)
         r = e.s["risk"]
@@ -215,6 +216,10 @@ class SwingTrader:
                 if not self.raise_cash(need):
                     continue
                 account = e.broker.account()
+                positions = e.broker.positions()                 # the index fund holding changed
+            if e.risk.halted_reason:          # kill switch / loss limit may have just been triggered
+                e._log(f"Swing: stopped before buying {sym} ({e.risk.halted_reason})")
+                break
             try:
                 oid = e.broker.submit_bracket(sym, qty, "long", stop, target, limit_price=limit)
             except Exception as ex:
@@ -257,6 +262,9 @@ class SwingTrader:
         """Put spare cash into the index fund (after the day's planned swing exits).
         When crash protection is defensive: nothing (step aside) or the inverse fund (short)."""
         e, cfg = self.e, self.cfg
+        if e.risk.halted_reason:          # kill switch / daily loss limit: no new purchases of any kind
+            e._log(f"Index fund: not investing today ({e.risk.halted_reason})")
+            return
         defensive = self.crash_mode() != "off" and (e.journal.get("crash_state") or {}).get("state") == "defensive"
         if defensive:
             if self.crash_mode() == "short":
@@ -333,7 +341,7 @@ class SwingTrader:
 
     def _buy_inverse_with_spare(self, wait_for_cash: bool = False):
         e = self.e
-        if e.live_locked(style="swing"):
+        if e.live_locked(style="swing") or e.risk.halted_reason:
             return
         if wait_for_cash:
             import time

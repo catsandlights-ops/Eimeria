@@ -96,7 +96,7 @@ def build_cases(events, px: dict, spy: pd.DataFrame, hold_days: int) -> list[dic
 
 
 def run_ai_test(broker, llms: list, cases: list[dict], sample: int, seed: int = 7, progress=None) -> list[ModelResult]:
-    rng = random.Random(seed)
+    rng = random.Random(seed)  # nosec B311 - sampling for a statistics test, not security
     picked = cases if len(cases) <= sample else rng.sample(cases, sample)
     picked.sort(key=lambda c: c["signal_date"])
     results = [ModelResult(llm.model) for llm in llms]

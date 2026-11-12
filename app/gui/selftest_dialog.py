@@ -86,7 +86,7 @@ class SelfTestDialog(QDialog):
         try:
             config.LOG_DIR.mkdir(exist_ok=True)
             (config.LOG_DIR / "selftest_report.txt").write_text(text, encoding="utf-8")
-        except Exception:
+        except Exception:  # nosec B110 - best-effort, must never raise
             pass
         self.win.ctx.journal.set("selftest_last", {"fails": fails, "warns": warns})
         if hasattr(self.win, "getting_started"):

@@ -20,8 +20,9 @@ import hashlib
 import io
 import json
 import logging
+import re
 import shutil
-import subprocess
+import subprocess  # nosec B404 - used with fixed argument lists, never a shell
 import sys
 import tempfile
 import zipfile
@@ -38,6 +39,10 @@ log = logging.getLogger(__name__)
 PROTECTED = {"settings.yaml", ".env", "trader.db", "trader.db-journal", "cache", "logs", "backups", ".venv",
              "venv", "updates", ".selftest_write", "dist", "build", "__pycache__", ".git", ".pytest_cache"}
 MANIFEST = "MANIFEST.sha256"
+TAG_PATTERN = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")
+MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024        # a release is ~0.5 MB; refuse anything absurd
+MAX_UNPACKED_BYTES = 200 * 1024 * 1024       # guards against "zip bombs"
+MAX_FILES = 5000
 
 
 def parse_version(v: str) -> tuple[int, ...]:
@@ -121,19 +126,31 @@ class Updater:
         info = r.json()
         if not isinstance(info, dict) or "version" not in info or "tag" not in info:
             raise ValueError("update.json is malformed")
+        if not TAG_PATTERN.match(str(info["tag"])) or info["tag"].lstrip("v") != str(info["version"]).lstrip("v"):
+            raise ValueError(f"update.json has an invalid version tag: {info['tag']!r}")
+        if not isinstance(info.get("notes", []), list):
+            raise ValueError("update.json notes must be a list")
         return info if is_newer(info["version"]) else None
 
     def download(self, info: dict, progress=lambda m: None) -> Path:
         """Download and verify a release. Returns the staging folder containing the new app files."""
         tag = info["tag"]
+        if not TAG_PATTERN.match(str(tag)):
+            raise ValueError(f"Invalid version tag: {tag!r}")
         url = f"https://github.com/{self.repo}/archive/refs/tags/{tag}.zip"
         progress(f"Downloading Eimeria {info['version']}...")
         r = requests.get(url, timeout=180)
         r.raise_for_status()
+        if len(r.content) > MAX_DOWNLOAD_BYTES:
+            raise ValueError(f"Update download is unexpectedly large ({len(r.content):,} bytes); refused.")
         staging_root = Path(tempfile.mkdtemp(prefix="eimeria_update_"))
         with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            infos = z.infolist()
+            if len(infos) > MAX_FILES or sum(i.file_size for i in infos) > MAX_UNPACKED_BYTES:
+                raise ValueError("Update archive is unexpectedly large when unpacked; refused.")
             for member in z.namelist():                 # refuse archives that write outside the folder
-                if member.startswith("/") or ".." in Path(member).parts:
+                norm = member.replace("\\", "/")
+                if norm.startswith("/") or ".." in Path(norm).parts or re.match(r"^[A-Za-z]:", norm):
                     raise ValueError(f"Unsafe file in update archive: {member}")
             z.extractall(staging_root)
         tops = [p for p in staging_root.iterdir() if p.is_dir()]
@@ -159,7 +176,7 @@ class Updater:
         flags = 0
         if sys.platform == "win32":
             flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        subprocess.Popen(args, creationflags=flags, close_fds=True, cwd=str(helper_dir))
+        subprocess.Popen(args, creationflags=flags, close_fds=True, cwd=str(helper_dir))  # nosec B603 - fixed program and arguments (our own Python + script)
 
     def backups(self) -> list[Path]:
         root = config.BASE_DIR / "backups"

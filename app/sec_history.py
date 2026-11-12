@@ -30,9 +30,12 @@ def quarters(start: date, end: date) -> list[tuple[int, int]]:
 
 def load_quarter(y: int, q: int, cache_dir: Path, user_agent: str) -> pd.DataFrame | None:
     """Purchases filed in one quarter, or None if the SEC hasn't published it yet."""
-    f = cache_dir / f"insider_{y}q{q}.pkl"
+    f = cache_dir / f"insider_{y}q{q}.csv.gz"     # plain data (not pickle, which can run code when loaded)
     if f.exists():
-        return pd.read_pickle(f)
+        df = pd.read_csv(f, dtype={"owner_id": str, "symbol": str, "owner": str, "title": str})
+        df["filed"] = pd.to_datetime(df["filed"]).dt.date
+        df["title"] = df["title"].fillna("")
+        return df
     r = requests.get(URL.format(y=y, q=q), headers={"User-Agent": user_agent}, timeout=180)
     if r.status_code == 404:
         return None
@@ -63,7 +66,7 @@ def load_quarter(y: int, q: int, cache_dir: Path, user_agent: str) -> pd.DataFra
     out = out[out["symbol"].str.fullmatch(r"[A-Z]{1,5}", na=False) & (out["value"] > 0)
               & (out["price"] < 100_000) & (out["value"] < 1e9)]
     cache_dir.mkdir(parents=True, exist_ok=True)
-    out.to_pickle(f)
+    out.to_csv(f, index=False)
     time.sleep(0.2)
     return out
 
