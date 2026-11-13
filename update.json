@@ -1,8 +1,10 @@
 {
-  "version": "0.2.5",
-  "commit": "b12f579ce79910031fd41254af83e38f3591d5c4",
+  "version": "0.2.6",
+  "commit": "328ed69dc0824ef07a41f80b3661b9e95f957446",
   "date": "2026-11-13",
   "notes": [
-    "Fix: after an update, Windows showed an error instead of the 'Updated from X to Y' message (and repeated it on every start)"
+    "Backtest tab: new 'Copy results' button to paste the results anywhere",
+    "Backtest tab: the account-value chart is no longer squashed (the tab scrolls, the chart keeps its height, dates are readable)",
+    "Selected table rows are highlighted in blue instead of red; the log panel starts smaller"
   ]
 }
