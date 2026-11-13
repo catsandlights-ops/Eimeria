@@ -1,10 +1,8 @@
 {
-  "version": "0.3.1",
-  "commit": "77cef09d7e7961ee84113a01e5bc103471922665",
+  "version": "0.3.2",
+  "commit": "1c9e36e793b891eb34b98f5ccc69c42f040b4d52",
   "date": "2026-11-13",
   "notes": [
-    "New backtest: S&P 500 late-day momentum (a published effect). The rules are fixed in advance and the result says PASS or FAIL: it must make money both before 2024 and from 2024 on.",
-    "Confirmed-gap day trading is now labelled as having lost money in testing (2-year test on all liquid US stocks).",
-    "Backtest tab: settings that don't apply to the chosen strategy are hidden or greyed out."
+    "Day trading removed from Settings: every version tested on real data lost money (chart signals, confirmed gaps, S&P 500 late-day momentum). It's switched off even if it was on before. The strategies can still be backtested."
   ]
 }
