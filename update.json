@@ -1,9 +1,10 @@
 {
-  "version": "0.1.2",
-  "commit": "9725e48e3bd7ed3400e70c3ca96153d5e12c7a2e",
-  "date": "2026-11-12",
+  "version": "0.2.0",
+  "commit": "a011d7f8f79452ee33ad447aca99af8dfd4b8e7a",
+  "date": "2026-11-13",
   "notes": [
-    "Updates are now published on GitHub (repository catsandlights-ops/Eimeria) and downloaded by exact commit, with an extra check that the downloaded version matches",
-    "Includes all 0.1.1 security, safety and reliability fixes"
+    "Windows app: download Eimeria-windows-0.2.0.zip from the Releases page, unzip, and run Eimeria.exe - no Python needed",
+    "The Windows app updates itself too: each release is built and tested on Windows by GitHub, and the update is offered once that build is ready",
+    "Security: blocked a Windows-only path trick that could have pointed outside the Eimeria folder"
   ]
 }
