@@ -1,9 +1,10 @@
 {
-  "version": "0.2.2",
-  "commit": "08acd6faf06f11417c0189c56649bf7e095e9192",
+  "version": "0.2.3",
+  "commit": "81ffc6e06420bd2a4433d93c28dd84e0efe51a9c",
   "date": "2026-11-13",
   "notes": [
-    "Alpaca keys: spaces, line breaks and invisible characters picked up when copying are removed automatically",
-    "If Alpaca rejects your keys, Eimeria now explains why: paper vs live keys, swapped Key ID and Secret, or an outdated secret"
+    "Updates: 'Check for updates now' always shows a clear answer (your version, the newest version on GitHub, or the exact error)",
+    "Updates: old update settings from early versions are corrected automatically, and if one GitHub address is blocked a second one is tried",
+    "Self-test: new 'Updates (GitHub)' check"
   ]
 }
