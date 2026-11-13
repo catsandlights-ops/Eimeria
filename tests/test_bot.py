@@ -1744,3 +1744,75 @@ def test_ai_trader_test(monkeypatch):
                   "time": datetime.combine(day, datetime.min.time(), NY).replace(hour=8)}]
     assert premarket_news(broker, day, date(2025, 3, 3)) == {}
     _ = pd
+
+
+def test_ai_trader_test_v2(monkeypatch):
+    import random as _r
+    from app.ai_news_test import run_ai_trader_test_v2
+    s = copy.deepcopy(DEFAULTS)
+    names = ["S" + "".join(chr(65 + int(c)) for c in f"{k:03d}") for k in range(30)]
+    data = synth_market(30, seed=12, start=date(2024, 6, 3))
+    data["SPY"] = synth_market(1, seed=13, start=date(2024, 6, 3))["SAAA"]
+    rng = _r.Random(2)
+    news = {}
+    for sym in names:
+        df = data[sym]
+        for ts in df.index[1:]:
+            day = ts.tz_convert(NY).date()
+            if rng.random() < 0.6:
+                continue
+            good = rng.random() < 0.5
+            df.at[ts, "close"] = df.at[ts, "open"] * (1.02 if good else 0.98) * (1 + rng.gauss(0, 0.01))
+            t = datetime.combine(day, datetime.min.time(), NY).replace(hour=7)
+            news.setdefault(day, []).append({"headline": f"{sym} {'raises guidance' if good else 'cuts guidance'}",
+                                             "summary": "", "symbols": [sym], "time": t})
+    asked = {"prep": [], "score": []}
+
+    class B(SynthBroker):
+        def news_window(self, start, end, max_items=200):
+            return [n for d in (start.date(), end.date()) for n in news.get(d, [])]
+
+        def news_between(self, symbols, start, end, limit=30):
+            future = {"headline": f"{symbols[0]} FUTURE", "summary": "", "symbols": symbols,
+                      "time": end + timedelta(hours=5)}
+            return [future] + [n for d, ns in news.items() if start.date() <= d <= end.date() for n in ns
+                               if symbols[0] in n["symbols"]]
+
+        def bars_range(self, syms, start, end, minutes=5, feed=None):
+            return {}                                     # no pre-market data: must still work
+
+    class SmartLLM:
+        def chat_json(self, system, user, schema=None):
+            assert "FUTURE" not in user                   # nothing published after the evening close
+            if "situation" in schema["properties"]:
+                asked["prep"].append(user)
+                return {"situation": "ok", "good_news_would_be": "raise", "bad_news_would_be": "cut",
+                        "already_expected": "flat"}
+            asked["score"].append(user)
+            assert "Your plan from last night: situation: ok" in user
+            return {"score": 0.9 if "raises" in user.split("New headlines")[1] else -0.9, "reasoning": "news"}
+    used = [date(2025, 2, 3), date(2025, 2, 4)]
+    res = run_ai_trader_test_v2(B(data), s, SmartLLM(), date(2025, 1, 1), date(2026, 9, 30), 400,
+                                exclude_days=used)
+    assert "AI trader v2: PASS" in res.headline, res.headline
+    assert not set(res.days_used) & set(used) and res.version == 2
+    assert len(asked["prep"]) == len(asked["score"]) > 0
+    assert {t["side"] for t in res.trades} == {"long", "short"}
+    assert "Pre-market move since yesterday's close: unknown" in asked["score"][0]
+
+
+def test_premarket_move():
+    import pandas as pd
+    from app.ai_news_test import Case, premarket_moves
+    day = date(2025, 3, 4)
+    idx = pd.date_range(pd.Timestamp(day).tz_localize(NY) + pd.Timedelta(hours=7), periods=40, freq="5min")
+    px = [100 + k for k in range(40)]                              # 7:00 -> 10:15; 9:15 bar = index 27
+    bars = {"XYZ": pd.DataFrame({"open": px, "high": px, "low": px, "close": px, "volume": 1.0},
+                                index=idx.tz_convert("UTC"))}
+
+    class B:
+        def bars_range(self, syms, start, end, minutes=5, feed=None):
+            return bars
+    c = Case("XYZ", day, ["h"], extra={"prev_close": 100.0})
+    moves = premarket_moves(B(), copy.deepcopy(DEFAULTS), day, [c])
+    assert moves["XYZ"] == pytest.approx(127 / 100 - 1)            # last bar starting before 9:20

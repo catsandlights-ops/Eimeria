@@ -8,7 +8,7 @@ from datetime import date, timedelta
 
 from PySide6.QtCore import QDate, QObject, Qt, Signal
 from PySide6.QtWidgets import (
-    QDateEdit, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+    QComboBox, QDateEdit, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
     QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -123,7 +123,20 @@ class AITab(QWidget):
         for d in (self.t_cutoff, self.t_end):
             d.setDisplayFormat("yyyy-MM-dd")
         self.t_sample = QSpinBox(minimum=40, maximum=3000, value=300, singleStep=50)
-        self.t_sample.setToolTip("Company-days to ask about. More = more reliable, slower. 300+ recommended.")
+        self.t_sample.setToolTip("Company-days to ask about. More = more reliable, slower. 300+ recommended "
+                                 "(version 2: 400+, since it needs 20+ trading days in each half).")
+        self.t_version = QComboBox()
+        self.t_version.addItems([
+            "Version 1: headlines only, buy / short / skip",
+            "Version 2: plans the evening before, then ranks companies each morning (2 answers each, slower)"])
+        self.t_version.setToolTip(
+            "Version 2: the evening before, the AI reviews each company (price trend, last week's news) and "
+            "writes what good or bad news would look like. At 9:20 AM it reads the new headlines and the "
+            "pre-market move and scores each company -1 to +1. Each day it buys the 2 best and shorts the 2 "
+            "worst. It's tested only on days version 1 didn't use.")
+        self.t_version.currentIndexChanged.connect(
+            lambda i: self.t_sample.setValue(max(self.t_sample.value(), 400) if i == 1 else self.t_sample.value()))
+        f.addRow("Version", self.t_version)
         f.addRow("AI knowledge cutoff (use news after)", self.t_cutoff)
         f.addRow("Up to", self.t_end)
         f.addRow("Company-days to ask the AI about", self.t_sample)
@@ -166,14 +179,18 @@ class AITab(QWidget):
             return
         self.t_run.setEnabled(False)
         self.t_verdict.setPlainText("")
+        used = [date.fromisoformat(d) for d in (self.win.ctx.journal.get("ai_trader_days_used") or [])]
         threading.Thread(target=self._trader_work, args=(e.broker, dict(self.win.ctx.settings), e.llm, start, end,
-                                                         self.t_sample.value()), daemon=True).start()
+                                                         self.t_sample.value(), self.t_version.currentIndex(), used),
+                         daemon=True).start()
 
-    def _trader_work(self, broker, settings, llm, start, end, sample):
-        from ..ai_news_test import run_ai_trader_test
+    def _trader_work(self, broker, settings, llm, start, end, sample, version, used):
+        from ..ai_news_test import run_ai_trader_test, run_ai_trader_test_v2
         try:
-            self.tbridge.done.emit(run_ai_trader_test(broker, settings, llm, start, end, sample,
-                                                      emit=self.tbridge.progress.emit), None)
+            emit = self.tbridge.progress.emit
+            res = (run_ai_trader_test(broker, settings, llm, start, end, sample, emit=emit) if version == 0 else
+                   run_ai_trader_test_v2(broker, settings, llm, start, end, sample, exclude_days=used, emit=emit))
+            self.tbridge.done.emit(res, None)
         except Exception as ex:
             self.tbridge.done.emit(None, f"{ex}\n{traceback.format_exc(limit=2)}")
 
@@ -185,6 +202,9 @@ class AITab(QWidget):
             QMessageBox.warning(self, "AI trader test", err)
             return
         self.t_status.setText("Done.")
+        if getattr(res, "version", 0) == 1 and getattr(res, "days_used", None):
+            used = set(self.win.ctx.journal.get("ai_trader_days_used") or [])     # version 1: remember its days
+            self.win.ctx.journal.set("ai_trader_days_used", sorted(used | {d.isoformat() for d in res.days_used}))
         self.t_verdict.setPlainText(res.headline + "\n" + " ".join(res.notes))
         rows, colors = [], []
         for r in res.edge_table:
@@ -195,8 +215,10 @@ class AITab(QWidget):
         fill_table(self.t_table, rows, colors)
         ex_rows, ex_colors = [], []
         for c in getattr(res, "ai_cases", [])[:500]:
-            ex_rows.append([str(c.day), c.symbol, c.action.upper(), f"{c.confidence:.2f}", c.reason,
-                            len(c.headlines), f"{c.excess:+.2%}"])
+            sc = c.extra.get("score")
+            why = c.reason + (f" | Plan: {c.extra['plan'][:200]}" if c.extra.get("plan") else "")
+            ex_rows.append([str(c.day), c.symbol, c.action.upper(), f"{c.confidence:.2f}" if sc is None else
+                            f"score {sc:+.2f}", why, len(c.headlines), f"{c.excess:+.2%}"])
             col = GREEN if c.action == "buy" else RED if c.action == "short" else None
             ex_colors.append([None, None, col, None, None, None, pnl_color(c.excess)])
         fill_table(self.t_examples, ex_rows, ex_colors)

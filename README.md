@@ -306,7 +306,9 @@ The AI reads the news and can **veto** swing candidates. That's the one part of 
 
 The rules are fixed in advance. The test **passes** only if the AI's trades make money in **both halves** of the period (40+ trades in each), with a t-statistic of 2 or more. Only then would Eimeria let the AI trade on its own, and only in paper trading first. Research (Lopez-Lira & Tang, 2023) found large AI models could predict next-day moves from headlines, mostly for small companies and bad news, and that the effect shrank over time. A small local model may do worse.
 
-Each answer takes about 5–15 seconds on a typical PC, so 300 answers take roughly 30–60 minutes. Set the cutoff **after** your model's release date (llama3.1 was released in July 2024), or the AI may "remember" what happened.
+Each answer takes about 5–15 seconds on a typical PC, so 300 answers take roughly 30–60 minutes.
+
+**Version 2 (prepares the evening before):** after the close, the AI reviews each company (price trend, distance from its 1-year high, size, the last week's news) and writes a plan: what's already expected, and what good or bad news would look like. At 9:20 AM it reads the new headlines and the pre-market move, compares them with its plan, and scores each company from -1 to +1. Each day it buys the 2 best-scored and shorts the 2 worst-scored companies, so the market's moves cancel out and only the AI's judgement counts. It passes if those daily results are positive in both halves (20+ trading days each). It's tested only on days version 1 didn't use, and it asks the AI twice per company, so 400 company-days take about 1–2 hours. Set the cutoff **after** your model's release date (llama3.1 was released in July 2024), or the AI may "remember" what happened.
 
 ## Strategy health: is the edge still working?
 

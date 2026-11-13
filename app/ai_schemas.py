@@ -25,3 +25,7 @@ AFTER_CLOSE = _obj({
 }, ["summary", "watch_tomorrow"])
 LESSONS = _obj({"review": STR, "new_lessons": {"type": "array", "items": STR},
                 "retire_lessons": {"type": "array", "items": STR}}, ["review", "new_lessons"])
+# AI trader test, version 2: the evening plan and the morning score
+PREP = _obj({"situation": STR, "good_news_would_be": STR, "bad_news_would_be": STR, "already_expected": STR},
+            ["situation", "good_news_would_be", "bad_news_would_be", "already_expected"])
+SCORE = _obj({"score": NUM, "reasoning": STR}, ["score", "reasoning"])
