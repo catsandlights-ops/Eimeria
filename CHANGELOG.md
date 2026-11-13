@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.2 (2026-11-13)
+- Day trading removed from Settings: every version tested on real data lost money (chart signals, confirmed gaps, S&P 500 late-day momentum). It's switched off even if it was on before. The strategies can still be backtested.
+
 ## 0.3.1 (2026-11-13)
 - New backtest: S&P 500 late-day momentum (a published effect). The rules are fixed in advance and the result says PASS or FAIL: it must make money both before 2024 and from 2024 on.
 - Confirmed-gap day trading is now labelled as having lost money in testing (2-year test on all liquid US stocks).
