@@ -1,8 +1,8 @@
 {
-  "version": "0.2.4",
-  "commit": "a358ea0a7bfdd975cffcb538ba10f8ac5282ea1b",
+  "version": "0.2.5",
+  "commit": "b12f579ce79910031fd41254af83e38f3591d5c4",
   "date": "2026-11-13",
   "notes": [
-    "Self-test: missing live quotes outside market hours are reported as normal instead of as a warning"
+    "Fix: after an update, Windows showed an error instead of the 'Updated from X to Y' message (and repeated it on every start)"
   ]
 }
