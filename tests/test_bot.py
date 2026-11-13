@@ -2,7 +2,7 @@
 import copy
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -1412,3 +1412,65 @@ def test_gap_live_trading(journal):
     eng.gap.decide_and_trade(today=DAY.date())
     assert broker.orders == []
     _ = pd
+
+
+# ---------------------------------------------------------------- S&P 500 late-day momentum (fixed test)
+def spy_days(start, n, effect, seed=0):
+    """Synthetic SPY 5-minute bars. effect > 0: the last 30 minutes follow the close-to-10:00 move."""
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    frames, px, d = [], 400.0, start
+    while len(frames) < n:
+        if d.weekday() < 5:
+            idx = pd.date_range(pd.Timestamp(d).tz_localize(NY) + pd.Timedelta(hours=9.5), periods=78, freq="5min")
+            prev = px
+            px *= 1 + rng.normal(0, 0.004)                                # overnight
+            rets = rng.normal(0, 0.0008, 78)
+            closes = np.empty(78)
+            for k in range(78):
+                if k >= 72:                                               # last 30 minutes
+                    move = closes[5] / prev - 1
+                    rets[k] += effect * np.sign(move) / 6
+                px *= 1 + rets[k]
+                closes[k] = px
+            opens = np.r_[closes[0] / (1 + rets[0]), closes[:-1]]
+            frames.append(pd.DataFrame({"open": opens, "high": np.maximum(opens, closes) * 1.0002,
+                                        "low": np.minimum(opens, closes) * 0.9998, "close": closes,
+                                        "volume": 1e6}, index=idx.tz_convert("UTC")))
+        d += timedelta(days=1)
+    return pd.concat(frames)
+
+
+def test_spy_momentum_signals_and_verdict():
+    import pandas as pd
+    from app.spy_momentum import SpyMomentumBacktester, daily_signals
+    s = copy.deepcopy(DEFAULTS)
+    start = date(2023, 1, 2)
+    bars = spy_days(start, 260 * 2, effect=0.0015)                     # strong built-in effect, both years
+    sig = daily_signals(bars)
+    assert len(sig) == 260 * 2 - 1                                     # first day has no previous close
+    r = sig.iloc[5]
+    day = pd.Timestamp(r["day"]).tz_localize(NY)
+    b = bars.tz_convert(NY)
+    prev_close = b[b.index.date < r["day"]]["close"].iloc[-1]
+    assert r["signal"] == pytest.approx(b.loc[day + pd.Timedelta(hours=9, minutes=55), "close"] / prev_close - 1)
+    assert r["entry"] == pytest.approx(b.loc[day + pd.Timedelta(hours=15, minutes=30), "open"])
+    res = SpyMomentumBacktester(s).run(bars, start, date(2025, 12, 31))
+    assert "PASS" in res.headline and res.stats["total_return"] > 0
+    assert {t["exit_reason"] for t in res.trades} == {"4 PM close"}
+    assert all(t["entry_time"].date() == t["exit_time"].date() for t in res.trades)   # never overnight
+    assert [h["name"] for h in res.halves][0].startswith("before 2024")
+    noise = SpyMomentumBacktester(s).run(spy_days(start, 520, effect=0.0, seed=5), start, date(2025, 12, 31))
+    assert "FAIL" in noise.headline
+    short = SpyMomentumBacktester(s).run(bars, date(2024, 2, 1), date(2025, 12, 31))   # no development years
+    assert "INCOMPLETE" in short.headline
+
+
+def test_spy_momentum_skips_early_close():
+    from app.spy_momentum import daily_signals
+    bars = spy_days(date(2024, 3, 4), 3, effect=0.0)
+    day2 = bars.tz_convert(NY)
+    cut = day2[~((day2.index.date == date(2024, 3, 5)) & (day2.index.hour >= 13))]   # 3/5 closes at 1 PM
+    sig = daily_signals(cut.tz_convert("UTC"))
+    assert [str(d) for d in sig["day"]] == ["2024-03-06"]             # 3/5 skipped, still gives 3/6 its prev close

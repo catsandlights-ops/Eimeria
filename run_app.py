@@ -24,7 +24,8 @@ def smoke_test(out_file: str) -> int:
         from app.version import VERSION
         import importlib
         for mod in ("app.ai_eval", "app.backtest", "app.selftest", "app.swing_data", "app.updater",
-                    "app.sec_history", "app.market_timing", "app.apply_update"):
+                    "app.sec_history", "app.market_timing", "app.apply_update", "app.gap", "app.gap_data",
+                    "app.gap_live", "app.spy_momentum"):
             importlib.import_module(mod)             # every module must be packaged in the .exe
 
         config.load_keys = lambda: ("", "")          # no keys: the app must still open (shows Settings)

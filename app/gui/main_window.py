@@ -429,11 +429,12 @@ class MainWindow(QMainWindow):
         self.f_day_on.setChecked(s["day_trading"]["enabled"])
         self.f_day_on.setToolTip("Backtests on real data found the day-trading signals did NOT beat costs.")
         gp = s["gap_trading"]
-        self.f_gap_on = QCheckBox("Confirmed-gap day trading: buy stocks that gap up 2%+ on overnight news AND keep "
-                                  "rising for 30 minutes; sell after 60 minutes")
+        self.f_gap_on = QCheckBox("Confirmed-gap day trading: buy 2%+ gap-ups that keep rising for 30 minutes "
+                                  "(LOST money in testing)")
         self.f_gap_on.setChecked(gp["enabled"])
-        self.f_gap_on.setToolTip("Test it first: Backtest tab > 'Day trading: confirmed gaps'. Real money stays "
-                                 "locked until 30 paper gap trades close with a profit factor of 1.2+.")
+        self.f_gap_on.setToolTip("A 2-year backtest on all liquid US stocks lost 0.22-0.25% per trade after costs "
+                                 "in both halves. Kept only for experiments; real money stays locked until 30 paper "
+                                 "gap trades close with a profit factor of 1.2+.")
         self.f_gap_short = QCheckBox("   ...also short confirmed gap-downs (inconsistent in testing)")
         self.f_gap_short.setChecked(gp["allow_short"])
         self.f_swing_on = QCheckBox("Swing trading: hold for days to weeks (see the Swing tab)")

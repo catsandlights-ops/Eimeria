@@ -36,6 +36,7 @@ class BTResult:
     halves: list[dict] = field(default_factory=list)       # results for the 1st and 2nd half separately
     edge_table: list[dict] = field(default_factory=list)   # avg result after costs by signal strength
     allow_short: bool = False
+    headline: str = ""                                     # verdict that overrides the generic one (pre-registered tests)
 
 
 def information_coefficient(scores: pd.Series, fwd: pd.Series) -> float:
@@ -337,6 +338,13 @@ def verdict(res: BTResult) -> str:
     s = res.stats
     if not s or s["trades"] == 0:
         return "No trades were taken. Try a longer period, more stocks, or a lower entry score."
+    if res.headline:                      # a pre-registered test: its own pass/fail decides, nothing else
+        msgs = []
+        if s["max_drawdown"] < -0.10:
+            msgs.append(f"Worst drop from a peak was {s['max_drawdown']:.1%}.")
+        if res.benchmark_return:
+            msgs.append(f"Simply holding the S&P 500 returned {res.benchmark_return:+.1%} vs {s['total_return']:+.1%}.")
+        return "\n".join(msgs)
     msgs = []
     if s["trades"] < 50:
         msgs.append(f"Only {s['trades']} trades: too few to trust. Test a longer period or more stocks.")

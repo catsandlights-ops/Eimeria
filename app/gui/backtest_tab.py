@@ -50,8 +50,9 @@ class BacktestTab(QWidget):
         info = QLabel(
             "Replays past market data through the bot's rules, including trading costs. Swing: insider "
             "purchases from the SEC's records (2006 onward; needs your SEC contact in Settings) on daily prices. "
-            "Day trading: chart signals on 5-minute prices, with a minimum signal score standing in for AI "
-            "approval. The AI's news judgement can't be replayed, so it isn't part of either test.")
+            "Day trading: 5-minute prices. S&P 500 late-day momentum is a fixed, pre-registered test: pick it, "
+            "test 2019 to yesterday, and it says PASS or FAIL. The AI's news judgement can't be replayed, so it "
+            "isn't part of any test.")
         info.setWordWrap(True)
         info.setStyleSheet(f"color: {MUTED};")
         lay.addWidget(info)
@@ -70,8 +71,10 @@ class BacktestTab(QWidget):
         self.slip = QDoubleSpinBox(minimum=0, maximum=1, decimals=3, singleStep=0.01, suffix=" %",
                                    value=s["backtest"]["slippage_pct"] * 100)
         self.strategy = QComboBox()
-        self.strategy.addItems(["Swing trading (daily bars, hold days-weeks)", "Day trading (5-minute bars)",
-                                "Day trading: confirmed gaps (overnight news, 5-minute bars)"])
+        self.strategy.addItems(["Swing trading (daily bars, hold days-weeks)",
+                                "Day trading: chart signals (LOST money in testing)",
+                                "Day trading: confirmed gaps (LOST money in testing)",
+                                "Day trading: S&P 500 late-day momentum (SPY, 1 trade a day, fixed test)"])
         self.universe = QComboBox()
         self.universe.addItems(["My stock list", "My list + every stock insiders bought (slower)"])
         self.universe.setToolTip("Insider buying happens mostly in smaller companies. Testing only your list "
@@ -153,6 +156,11 @@ class BacktestTab(QWidget):
     def _strategy_changed(self, i: int):
         self.universe.setEnabled(i in (0, 2))
         self.score.setEnabled(i == 1)
+        self.apply_btn.setVisible(i == 1)                 # signal weights only exist for chart signals
+        self.symbols.setEnabled(i != 3)                   # the momentum test always uses SPY
+        if i == 3:                                        # the fair test: development years + unseen years
+            self.start.setDate(QDate(2019, 1, 2))
+            self.end.setDate(QDate.currentDate().addDays(-1))
         self.universe.setItemText(1, "My list + every stock insiders bought (slower)" if i == 0 else
                                   "My list + all liquid US stocks (slower)")
 
@@ -164,12 +172,15 @@ class BacktestTab(QWidget):
             return
         syms = [x.strip().upper() for x in self.symbols.text().replace(";", ",").split(",") if x.strip()]
         start, end = self.start.date().toPython(), self.end.date().toPython()
+        momentum = self.strategy.currentIndex() == 3
+        if momentum:
+            syms = ["SPY"]
         if not syms or end <= start:
             QMessageBox.warning(self, "Check inputs", "Enter some stocks and a valid date range.")
             return
         swing = self.strategy.currentIndex() == 0
         gap = self.strategy.currentIndex() == 2
-        max_days = 365 * 8 if swing else 365 * 5 if gap else 750
+        max_days = 365 * 8 + 5 if swing or momentum else 365 * 5 if gap else 750
         if (end - start).days > max_days or len(syms) > 80:
             QMessageBox.warning(self, "Too big", f"Please test at most {max_days // 365} years and 80 stocks "
                                                  "in your list at a time.")
@@ -182,7 +193,9 @@ class BacktestTab(QWidget):
         self.apply_btn.setEnabled(False)
         self.status.setText("Starting...")
         self._rec_run, self.recommended = self.recommended and swing, False
-        if gap:
+        if momentum:
+            threading.Thread(target=self._work_momentum, args=(eng.broker, settings, start, end), daemon=True).start()
+        elif gap:
             threading.Thread(target=self._work_gap, args=(eng.broker, settings, syms, start, end,
                                                           self.universe.currentIndex() == 1), daemon=True).start()
         elif swing:
@@ -203,6 +216,16 @@ class BacktestTab(QWidget):
             res = GapBacktester(settings).run(events, intraday, spy, start, end)
             res.notes = notes + res.notes
             self.bridge.done.emit(res, None)
+        except Exception as e:
+            self.bridge.done.emit(None, f"{e}\n" + traceback.format_exc(limit=2))
+
+    def _work_momentum(self, broker, settings, start: date, end: date):
+        from ..spy_momentum import SpyMomentumBacktester, load_spy_bars
+        try:
+            bars = load_spy_bars(broker, start, end, settings["backtest"].get("data_feed", "sip"),
+                                 self.bridge.progress.emit)
+            self.bridge.progress.emit("Simulating...")
+            self.bridge.done.emit(SpyMomentumBacktester(settings).run(bars, start, end), None)
         except Exception as e:
             self.bridge.done.emit(None, f"{e}\n" + traceback.format_exc(limit=2))
 
@@ -258,13 +281,19 @@ class BacktestTab(QWidget):
         self.result_tabs.setCurrentIndex(0 if res.edge_table else 1)   # swing results have no edge table
         gap_result = bool(res.trades) and res.trades[0].get("setup") == "gap_confirmed" or \
             any("gap up" in r.get("band", "") or "gap down" in r.get("band", "") for r in res.edge_table)
-        self.edge_table.horizontalHeaderItem(0).setText("What happened in the first 30 min" if gap_result
-                                                        else "Signal strength")
+        momentum_result = bool(res.trades) and res.trades[0].get("setup") == "spy_momentum"
+        self.edge_table.horizontalHeaderItem(0).setText(
+            "Rule" if momentum_result else "What happened in the first 30 min" if gap_result else "Signal strength")
+        self.edge_table.horizontalHeaderItem(2).setText("Before 2024: avg after costs" if momentum_result
+                                                        else "1st half: avg after costs")
+        self.edge_table.horizontalHeaderItem(4).setText("2024 onward: avg after costs" if momentum_result
+                                                        else "2nd half: avg after costs")
         self.status.setText("Done.")
         if res.notes:
             self.status.setToolTip("\n".join(res.notes))
+        head = (res.headline + "\n") if res.headline else ""
         if not s:
-            self.verdict.setPlainText(verdict(res))
+            self.verdict.setPlainText(head + verdict(res))
             return
         pf = s["profit_factor"]
         self.c_ret.set(f"{s['total_return']:+.1%}", pnl_color(s["total_return"]))
@@ -279,7 +308,7 @@ class BacktestTab(QWidget):
             f"{h['name'].capitalize()} (from {h['from']}): {h['trades']} trades, P&L {money(h['pnl'])}, "
             f"profit factor {'∞' if h['profit_factor'] == float('inf') else format(h['profit_factor'], '.2f')}"
             for h in res.halves)
-        self.verdict.setPlainText(verdict(res) + (f"\n{halves}" if halves else "") +
+        self.verdict.setPlainText(head + verdict(res) + (f"\n{halves}" if halves else "") +
                              (f"\nHow trades ended: {reasons}" if reasons else "") +
                              ("\n" + " ".join(res.notes) if res.notes else ""))
         rows, colors = [], []

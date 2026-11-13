@@ -155,24 +155,28 @@ Full-market historical data (all exchanges) is free on Alpaca for anything older
 
 ---
 
-## Day trading: confirmed gaps (off by default)
+## Day trading: confirmed gaps (LOST money in testing)
 
-Day trading on chart patterns lost money in testing (see *Research results*). This day-trading strategy instead trades **overnight news, but only once the market has confirmed it**:
+The idea: trade overnight news only once the market confirms it. Buy a stock that opened 2%+ higher and was still rising 30 minutes later, stop-loss at the 30-minute low, sell 60 minutes later.
 
-1. **9:30 AM:** a stock opens at least **2% above** yesterday's close (overnight news: earnings, an upgrade, a contract). It must cost $5 or more and trade at least $20M a day.
-2. **Wait 30 minutes.** At 10:05 AM, if the stock is still above where it was after the first 5 minutes, the move is **confirmed**. If it fell back, it's skipped, because reversals did badly in testing.
-3. **The AI reads the news** and can veto it. For example, it rejects a jump caused by a buyout offer at a fixed price, a share sale or a meme spike.
-4. **Buy at about 10:06 AM.** The stop-loss is the lowest price of the first 30 minutes (never more than 4% below the entry), and each trade risks at most 0.5% of the account.
-5. **Sell 60 minutes later**, or earlier if the stop-loss is hit. Positions are never held overnight.
+A first test (46 large stocks, 60 days) looked good: +0.55% and +0.33% per trade. **The full test didn't hold up.** Over 2 years on all liquid US stocks, confirmed gap-ups lost **0.22% per trade in the first half and 0.25% in the second** after costs (about 3,400 trades in each half), and the backtest lost 59% while the S&P 500 made 41%. They lost money even before costs. The short test had simply caught a lucky stretch.
 
-**Research** (5-minute prices, 46 large stocks, 60 trading days, trading costs included): confirmed gap-ups made **+0.55% per trade in the first half and +0.33% in the second half** (profit factor 2.0, 81 trades). Gap-ups that reversed in the first 30 minutes, and short trades on gap-downs, made money in one half and lost it in the other. That's why shorting is a separate option, off by default.
+It stays in the app, off, for experiments only, with its own real-money lock (30 closed paper gap trades with a profit factor of 1.2+).
 
-**Treat this as promising, not proven.** 60 days is a short test. Before turning it on:
-1. In the **Backtest** tab, choose *Day trading: confirmed gaps* and *My list + all liquid US stocks*, and test at least 1–2 years. This downloads 5-minute prices for gap days only, so it takes a while.
-2. In the results table, *gap up, kept going (confirmed)* should be positive in **both halves**. If it isn't, leave it off.
-3. Turn it on in **Settings → Strategies**, in paper mode. Real money stays locked until there are **30 closed paper gap trades** in the last 120 days with a profit factor of at least 1.2.
+---
 
-**Small accounts:** each gap trade is a day trade. US rules allow only 3 day trades in 5 days on margin accounts under $25,000.
+## Day trading: S&P 500 late-day momentum (a fixed, fair test)
+
+A published effect (Gao, Han, Li & Zhou, *Journal of Financial Economics*, 2018): the S&P 500 fund's move from yesterday's close to 10 AM tended to continue in the **last 30 minutes** of the day, probably because big funds rebalance near the close. Effects often weaken after they're published, so this checks whether it still works.
+
+**The rules are fixed in the code, not settings, so they can't be tuned until the past looks good:**
+- Signal: SPY's move from yesterday's 4 PM close to 10:00 AM.
+- 3:30 PM: buy SPY if that move was up, short it if it was down. Sell or cover at the 4 PM close. One trade a day; early-close days are skipped.
+- 100% of the account, no leverage. Costs: 0.01% per fill (SPY's spread is about 0.002%). The table also shows the result at your own cost setting.
+
+**Pass or fail was decided before seeing any results.** The average trade after costs must be positive **before 2024** (2019–2023) **and from 2024 on** (data the idea was never fitted to), with a t-statistic of at least 2 over the whole test. Anything else is a fail, and the idea is dropped rather than adjusted.
+
+**Run it:** Backtest tab → *Day trading: S&P 500 late-day momentum*. The dates are set to 2019 through yesterday for you. Click **Run backtest** and read the first line: PASS or FAIL. Only the backtest exists so far; live trading would be built only if it passes.
 
 ---
 
@@ -203,7 +207,7 @@ Day trading on chart patterns lost money in testing (see *Research results*). Th
 
 All tests used real data, with trading costs, buying at the next day's open after the information became public.
 
-**Day trading** (5-minute prices, 46 large stocks, Aug–Nov 2026): the chart signals lost money after costs (profit factor 0.79, -5.2%), and their direction flipped between the two halves. Opening-range breakouts and an adaptive momentum/reversal switch didn't work either. **Confirmed gap-ups** (overnight news that kept going for 30 minutes) were the exception: +0.55% and +0.33% per trade after costs in the two halves (see *Day trading: confirmed gaps*).
+**Day trading** (5-minute prices, 46 large stocks, Aug–Nov 2026): the chart signals lost money after costs (profit factor 0.79, -5.2%), and their direction flipped between the two halves. Opening-range breakouts and an adaptive momentum/reversal switch didn't work either. **Confirmed gap-ups** (overnight news that kept going for 30 minutes) looked good over 60 days but lost 0.22–0.25% per trade over 2 years on all liquid stocks (see *Day trading: confirmed gaps*).
 
 **Swing trading** (every insider purchase filed with the SEC 2019 – Q1 2026, about 112,000 filings, plus 7 years of daily prices for about 2,800 stocks):
 
