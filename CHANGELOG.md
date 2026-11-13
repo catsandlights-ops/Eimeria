@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.0 (2026-11-13)
+- New: day trading on confirmed gaps. Trades overnight news only after the first 30 minutes confirm the move (buy at ~10:06, stop at the 30-minute low, sell after 60 minutes). Off by default: backtest it first (Backtest tab > Day trading: confirmed gaps).
+- Gap trading has its own real-money lock: 30 closed paper gap trades with a profit factor of 1.2 or more.
+- Safety fix: if the broker fails when day trades are sold at the end of the day, Eimeria now keeps retrying until the close instead of trying once.
+- The old chart-pattern day trading is labelled as having lost money in testing.
+
 ## 0.2.6 (2026-11-13)
 - Backtest tab: new 'Copy results' button to paste the results anywhere
 - Backtest tab: the account-value chart is no longer squashed (the tab scrolls, the chart keeps its height, dates are readable)
