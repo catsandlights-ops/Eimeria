@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 (2026-11-13)
+- New backtest: S&P 500 late-day momentum (a published effect). The rules are fixed in advance and the result says PASS or FAIL: it must make money both before 2024 and from 2024 on.
+- Confirmed-gap day trading is now labelled as having lost money in testing (2-year test on all liquid US stocks).
+- Backtest tab: settings that don't apply to the chosen strategy are hidden or greyed out.
+
 ## 0.3.0 (2026-11-13)
 - New: day trading on confirmed gaps. Trades overnight news only after the first 30 minutes confirm the move (buy at ~10:06, stop at the 30-minute low, sell after 60 minutes). Off by default: backtest it first (Backtest tab > Day trading: confirmed gaps).
 - Gap trading has its own real-money lock: 30 closed paper gap trades with a profit factor of 1.2 or more.
