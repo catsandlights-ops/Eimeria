@@ -1,0 +1,9 @@
+name: ci-test
+on:
+  push:
+    branches: [claude/ci-test]
+jobs:
+  hello:
+    runs-on: windows-latest
+    steps:
+      - run: python --version
