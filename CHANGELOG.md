@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.2 (2026-11-13)
+- AI trader test, version 2: the evening before, the AI reviews each company and writes a plan (what's expected, what good or bad news would look like). At 9:20 AM it compares the new headlines and the pre-market move with its plan and scores each company. Each day it buys the 2 best and shorts the 2 worst. It's tested on days version 1 didn't use.
+
 ## 0.4.1 (2026-11-13)
 - New in the AI tab: AI trader test. Your AI reads pre-market news for past days and decides buy, short or skip; it checks whether those trades would have made money (vs the S&P 500, after costs). The rules are fixed in advance, and the AI only gets to trade on its own if it passes.
 - Fix: if crash protection was switched from 'short' to another setting while holding the inverse fund (SH), Eimeria now sells it instead of leaving it behind.
