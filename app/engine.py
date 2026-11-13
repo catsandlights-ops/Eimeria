@@ -442,8 +442,8 @@ class Engine:
         sw, out = self.s["swing"], set()
         if sw.get("idle_cash_in_index"):
             out.add(sw.get("index_symbol", "SPY"))
-        if sw.get("crash_protection") == "short":
-            out.add(sw.get("inverse_symbol", "SH"))
+        if sw.get("crash_protection") == "short" or self.journal.get("inverse_by_bot"):
+            out.add(sw.get("inverse_symbol", "SH"))      # (still being unwound after the setting changed)
         return out
 
     def check_protection(self, force: bool = False):

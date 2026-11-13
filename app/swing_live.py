@@ -303,6 +303,8 @@ class SwingTrader:
     def apply_crash_protection(self, today: date) -> bool:
         """Check the 10-month rule and act on it. Returns True if defensive (no new swing buys)."""
         e, mode = self.e, self.crash_mode()
+        if mode != "short":
+            self._exit_inverse("short mode is no longer selected")   # e.g. the setting was changed
         if mode == "off":
             return False
         try:
@@ -331,13 +333,30 @@ class SwingTrader:
             if mode == "short" and not locked:
                 self._buy_inverse_with_spare(wait_for_cash=True)
             return True
-        if self.inverse_symbol in held and not locked:
-            try:
-                e.broker.close_position(self.inverse_symbol)
-                e._log(f"Crash protection: sold the {self.inverse_symbol} inverse fund (market back above trend).")
-            except Exception as ex:
-                e._log(f"Crash protection: could not sell {self.inverse_symbol}: {ex}", level=logging.ERROR)
+        if self.inverse_symbol in held:
+            self._exit_inverse("market back above trend", held)
         return False
+
+    def _exit_inverse(self, why: str, held: dict | None = None):
+        """Sell the inverse fund the bot bought. Selling only reduces risk, so it's allowed even while
+        real-money trading is locked. A fund the user bought themselves (not marked as the bot's) is left alone
+        when short mode is switched off."""
+        e = self.e
+        mine = bool(e.journal.get("inverse_by_bot"))
+        if not mine and why != "market back above trend":
+            return
+        if held is None:
+            held = {p["symbol"]: p for p in e.broker.positions()}
+        if self.inverse_symbol not in held:
+            if mine:
+                e.journal.set("inverse_by_bot", False)        # already gone (e.g. "close all" was used)
+            return
+        try:
+            e.broker.close_position(self.inverse_symbol)
+            e.journal.set("inverse_by_bot", False)
+            e._log(f"Crash protection: sold the {self.inverse_symbol} inverse fund ({why}).")
+        except Exception as ex:
+            e._log(f"Crash protection: could not sell {self.inverse_symbol}: {ex}", level=logging.ERROR)
 
     def _buy_inverse_with_spare(self, wait_for_cash: bool = False):
         e = self.e
@@ -352,6 +371,7 @@ class SwingTrader:
             return
         try:
             e.broker.trade_notional(self.inverse_symbol, "buy", spare)
+            e.journal.set("inverse_by_bot", True)
             e._log(f"Crash protection (short): put ${spare:,.0f} into {self.inverse_symbol}, which rises when "
                    f"the S&P 500 falls.")
         except Exception as ex:

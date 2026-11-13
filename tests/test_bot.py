@@ -659,7 +659,34 @@ def test_live_crash_protection(journal):
     assert all(p[0] != "SH" for p in broker.protects)                  # no stop-loss on the fund
     spy["data"] = spy_history()                                        # market back above trend
     assert sw.apply_crash_protection(DAY.date() + timedelta(days=3)) is False
-    assert "SH" in broker.closed
+    assert "SH" in broker.closed and not journal.get("inverse_by_bot")
+
+
+def test_inverse_fund_is_sold_when_short_mode_is_switched_off(journal):
+    from app.swing_live import SwingTrader
+    s = swing_settings()
+    s["swing"].update(crash_protection="short")
+    broker = FakeBroker()
+    broker.daily_bars = lambda syms, days=40: {"SPY": spy_history(drop_last_months=4)}
+    broker.trade_notional = lambda sym, side, dollars: "n1"
+    eng = engine(s, journal, broker)
+    sw = SwingTrader(eng)
+    assert sw.apply_crash_protection(DAY.date()) is True                # defensive: buys the inverse fund
+    assert journal.get("inverse_by_bot")
+    sh = {"symbol": "SH", "qty": 50, "side": "long", "avg_entry": 40, "current_price": 42,
+          "unrealized_pl": 100, "unrealized_plpc": 0.05}
+    broker.held.append(dict(sh))
+    # The user changes the setting to "step aside" while the market is still below trend: sell the short
+    s["swing"]["crash_protection"] = "step_aside"
+    assert "SH" in eng.fund_symbols()                                  # no generic stop-loss while unwinding
+    assert sw.apply_crash_protection(DAY.date() + timedelta(days=1)) is True
+    assert broker.closed == ["SH"] and not journal.get("inverse_by_bot")
+    assert "SH" not in eng.fund_symbols()
+    # An SH position the user bought themselves is left alone when short mode is off
+    broker.held = [dict(sh)]
+    s["swing"]["crash_protection"] = "off"
+    sw.apply_crash_protection(DAY.date() + timedelta(days=2))
+    assert broker.closed == ["SH"]
 
 
 # ---------------------------------------------------------------- local AI client

@@ -415,7 +415,7 @@ class SimLLM:
 
 
 # ----------------------------------------------------------------------------- driver + invariants
-def run(days=20, faults=0.05, seed=1, verbose=False, kill_on_day=None, gap=True) -> dict:
+def run(days=20, faults=0.05, seed=1, verbose=False, kill_on_day=None, gap=True, crash="step_aside") -> dict:
     import app.engine as engine_mod
     import app.journal as journal_mod
     import app.learner as learner_mod
@@ -436,12 +436,12 @@ def run(days=20, faults=0.05, seed=1, verbose=False, kill_on_day=None, gap=True)
     real_sleep = real_time.sleep
     real_time.sleep = lambda s: None
     try:
-        return _run(days, faults, rng, verbose, kill_on_day, engine_mod, gap)
+        return _run(days, faults, rng, verbose, kill_on_day, engine_mod, gap, crash)
     finally:
         real_time.sleep = real_sleep
 
 
-def _run(days, faults, rng, verbose, kill_on_day, engine_mod, gap=True):
+def _run(days, faults, rng, verbose, kill_on_day, engine_mod, gap=True, crash_mode="step_aside"):
     from app.journal import Journal
     start = date(2026, 3, 2)
     SIM["now"] = datetime(2026, 3, 2, 7, 0, tzinfo=NY)
@@ -454,7 +454,7 @@ def _run(days, faults, rng, verbose, kill_on_day, engine_mod, gap=True):
     s["watchlist"] = symbols[:15]
     s["day_trading"]["enabled"] = True
     s["allow_short"] = True
-    s["swing"].update(enabled=True, use_ai_review=True, idle_cash_in_index=True, crash_protection="step_aside",
+    s["swing"].update(enabled=True, use_ai_review=True, idle_cash_in_index=True, crash_protection=crash_mode,
                       require_uptrend=False, hold_days=5)
     s["swing"]["insider"]["min_value"] = 1_000_000
     # confirmed-gap day trading, with loose filters so simulated (small) gaps qualify
@@ -598,8 +598,9 @@ def main():
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--kill-on-day", type=int, default=None)
     ap.add_argument("--no-gap", action="store_true", help="leave confirmed-gap day trading off")
+    ap.add_argument("--crash", default="step_aside", choices=["off", "step_aside", "short"])
     a = ap.parse_args()
-    r = run(a.days, a.faults, a.seed, verbose=True, kill_on_day=a.kill_on_day, gap=not a.no_gap)
+    r = run(a.days, a.faults, a.seed, verbose=True, kill_on_day=a.kill_on_day, gap=not a.no_gap, crash=a.crash)
     print({k: v for k, v in r.items() if k not in ("violations", "errors", "swing_log")})
     if a.days <= 5:
         print("swing log:", *r["swing_log"][:25], sep="\n  ")
