@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.3 (2026-11-13)
+- AI trader test, version 3: the AI reacts to news published DURING market hours. It uses its plan from the evening before, and the entry is delayed realistically (the AI's real answer time plus a minute). The results show how much being slower than professional traders costs.
+
 ## 0.4.2 (2026-11-13)
 - AI trader test, version 2: the evening before, the AI reviews each company and writes a plan (what's expected, what good or bad news would look like). At 9:20 AM it compares the new headlines and the pre-market move with its plan and scores each company. Each day it buys the 2 best and shorts the 2 worst. It's tested on days version 1 didn't use.
 
