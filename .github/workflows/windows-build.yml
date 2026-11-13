@@ -1,0 +1,95 @@
+# Builds Eimeria.exe on a Windows machine every time a release is published to claude/releases,
+# tests it, and attaches Eimeria-windows-<version>.zip to a GitHub Release named v<version>.
+name: Windows build
+on:
+  push:
+    branches: [claude/releases]
+  workflow_dispatch:
+permissions:
+  contents: write            # needed to create the GitHub Release
+concurrency:
+  group: windows-build
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+      - name: Run all tests on Windows
+        run: python -m pytest -q
+      - name: Read version
+        id: v
+        shell: python
+        run: |
+          import json, os, re
+          v = re.search(r'VERSION = "([^"]+)"', open("app/version.py").read()).group(1)
+          u = json.load(open("update.json"))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"version={v}\n")
+              f.write(f"published={'yes' if u.get('version') == v else 'no'}\n")
+      - name: Build Eimeria.exe
+        run: python -m PyInstaller --noconfirm --clean --windowed --name Eimeria --collect-data tzdata --collect-submodules alpaca run_app.py
+      - name: Smoke test (start the packaged app and build its whole window)
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP "smoke.txt"
+          $p = Start-Process -FilePath "dist\Eimeria\Eimeria.exe" -ArgumentList "--smoke-test", $out -Wait -PassThru
+          Get-Content $out
+          if ($p.ExitCode -ne 0) { throw "smoke test exit code $($p.ExitCode)" }
+          if (-not (Select-String -Path $out -Pattern "^ok ${{ steps.v.outputs.version }} ")) { throw "smoke test failed" }
+      - name: Fingerprints, safety checks and zip
+        shell: python
+        run: |
+          import shutil, sys
+          from pathlib import Path
+          sys.path.insert(0, ".")
+          from app.updater import verify_manifest, write_manifest
+          v = "${{ steps.v.outputs.version }}"
+          root = Path("dist/Eimeria")
+          for user_file in ("settings.yaml", ".env", "trader.db", "logs", "cache", "backups"):
+              assert not (root / user_file).exists(), f"user data {user_file} must not be in the build"
+          (root / "VERSION.txt").write_text(v, encoding="utf-8")
+          write_manifest(root)
+          assert verify_manifest(root) == [], "manifest check failed"
+          shutil.make_archive(f"Eimeria-windows-{v}", "zip", root_dir="dist", base_dir="Eimeria")
+          size = Path(f"Eimeria-windows-{v}.zip").stat().st_size
+          print(f"Eimeria-windows-{v}.zip: {size / 1e6:.0f} MB")
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Eimeria-windows-${{ steps.v.outputs.version }}
+          path: Eimeria-windows-${{ steps.v.outputs.version }}.zip
+          retention-days: 14
+      - name: Publish the GitHub Release
+        if: steps.v.outputs.published == 'yes'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.v.outputs.version }}"
+          $notes = (Get-Content update.json -Raw | ConvertFrom-Json).notes | ForEach-Object { "- $_" }
+          $body = @(
+            "## What's new"; $notes; "";
+            "## Install (Windows)";
+            "1. Download **Eimeria-windows-$v.zip** below and unzip it, e.g. into Documents (not Program Files).";
+            "2. Open the **Eimeria** folder and run **Eimeria.exe**.";
+            "3. Windows may say *Windows protected your PC* because the app isn't code-signed: click **More info** > **Run anyway**.";
+            "";
+            "Already have Eimeria? Use **Update available** in the app instead; your settings and trades are kept."
+          ) -join "`n"
+          Set-Content -Path notes.md -Value $body -Encoding utf8
+          gh release view "v$v" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "v$v" "Eimeria-windows-$v.zip" --clobber
+          } else {
+            gh release create "v$v" "Eimeria-windows-$v.zip" --target $env:GITHUB_SHA --title "Eimeria $v" --notes-file notes.md
+          }

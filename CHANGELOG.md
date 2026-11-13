@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 (2026-11-13)
+- Windows app: download Eimeria-windows-0.2.0.zip from the Releases page, unzip, and run Eimeria.exe - no Python needed
+- The Windows app updates itself too: each release is built and tested on Windows by GitHub, and the update is offered once that build is ready
+- Security: blocked a Windows-only path trick that could have pointed outside the Eimeria folder
+
 ## 0.1.2 (2026-11-12)
 - Updates are now published on GitHub (repository catsandlights-ops/Eimeria) and downloaded by exact commit, with an extra check that the downloaded version matches
 - Includes all 0.1.1 security, safety and reliability fixes

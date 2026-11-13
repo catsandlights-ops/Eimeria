@@ -30,7 +30,7 @@ def app_files(root: Path) -> list[Path]:
     out = []
     for p in sorted(root.rglob("*")):
         rel = p.relative_to(root)
-        if rel.parts[0] in PROTECTED or "__pycache__" in rel.parts or p.is_dir() or rel.suffix == ".pyc":
+        if rel.parts[0] in PROTECTED or "__pycache__" in rel.parts or p.is_dir():
             continue
         out.append(rel)
     return out
@@ -45,8 +45,11 @@ def manifest_files(root: Path) -> set[str]:
 
 def safe_rel(rel: str) -> bool:
     """A relative path that stays inside the app folder (no '..', no drive letters, not absolute)."""
-    p = Path(rel.replace("\\", "/"))
-    return bool(rel) and not p.is_absolute() and ".." not in p.parts and ":" not in rel
+    norm = rel.replace("\\", "/")
+    p = Path(norm)
+    # Reject "/x" and "\\x" too: on Windows those aren't "absolute" but still point outside the folder
+    return bool(rel) and not norm.startswith("/") and not p.is_absolute() and ".." not in p.parts \
+        and ":" not in rel
 
 
 def sha(path: Path) -> str:
@@ -54,6 +57,8 @@ def sha(path: Path) -> str:
 
 
 def read_version(root: Path) -> str:
+    if (root / "VERSION.txt").exists():                       # Windows .exe builds
+        return (root / "VERSION.txt").read_text(encoding="utf-8").strip()
     try:
         for line in (root / "app" / "version.py").read_text(encoding="utf-8").splitlines():
             if line.startswith("VERSION"):
@@ -166,7 +171,9 @@ def main(argv=None) -> int:
         flags = 0
         if sys.platform == "win32":
             flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        subprocess.Popen([python_in(target, True), str(target / "run_app.py")], cwd=str(target),  # nosec B603 - fixed program and arguments (our own Python + script)
+        exe = target / "Eimeria.exe"
+        cmd = [str(exe)] if exe.exists() else [python_in(target, True), str(target / "run_app.py")]
+        subprocess.Popen(cmd, cwd=str(target),  # nosec B603 - fixed program and arguments (our own Python + script)
                          creationflags=flags, close_fds=True)
     return 0 if result["ok"] else 1
 

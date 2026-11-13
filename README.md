@@ -31,9 +31,17 @@ It also:
 
 ## Setup (about 30 minutes, one time)
 
-### Step 1: Install Python
-1. Go to https://www.python.org/downloads/ and download **Python 3.12** or newer.
-2. Run the installer. **Tick the box "Add python.exe to PATH"** at the bottom of the first screen, then click *Install Now*.
+### Step 1: Download Eimeria
+1. Go to **https://github.com/catsandlights-ops/Eimeria/releases** and download the newest **`Eimeria-windows-<version>.zip`** (about 100 MB).
+2. Unzip it somewhere you can write to, like **Documents**. Avoid *Program Files*: Eimeria keeps its settings and trade history next to the program, and updates need to replace files there.
+3. Open the **Eimeria** folder and double-click **`Eimeria.exe`**.
+4. Windows may show **"Windows protected your PC"**, because the app isn't code-signed (a signing certificate costs a few hundred dollars a year). Click **More info → Run anyway**. Some antivirus programs also flag apps packaged this way; Eimeria's code is public in the repository if you want to check it.
+
+No Python install is needed: everything Eimeria needs is inside the folder.
+
+> **Upgrading from an older Eimeria or "AI Day Trader" folder?** Unzip the new **Eimeria** folder *next to* the old `ai-trader` folder. On first start, Eimeria copies your settings, keys and trade history across.
+>
+> **Prefer running from the Python source?** Install Python 3.12+ (tick *Add python.exe to PATH*), download the source code from the same Releases page, then run `setup.bat` once and `run.bat` each time. Everything else works the same.
 
 ### Step 2: Install the free local AI (Ollama)
 1. Download Ollama for Windows from https://ollama.com/download and install it.
@@ -51,25 +59,24 @@ It also:
 2. In the dashboard, make sure you are in **Paper Trading** (top-left account switcher).
 3. On the right side, find **API Keys** and click **Generate New Keys**. Copy both the **Key ID** and the **Secret Key**. The secret is shown only once.
 
-### Step 4: Install the app
-1. Unzip the `eimeria` folder somewhere easy, like `Documents\eimeria`.
-2. Double-click **`setup.bat`**. Wait until it says *Setup complete* (a few minutes).
-
-### Step 5: Start it
-1. Double-click **`run.bat`**.
+### Step 4: Start Eimeria
+1. Double-click **`Eimeria.exe`** (or `run.bat` for the Python version).
 2. Read and accept the risk notice.
-3. The **Getting started** checklist at the top of the Dashboard walks you through the rest, one button per step: connect Alpaca, add your SEC contact, run the recommended swing backtest (2019 to now, 10–30 minutes the first time), and start paper trading. Each step ticks itself off. The detailed steps below cover the same ground.
-3. Go to the **Settings** tab:
+
+The **Getting started** checklist at the top of the Dashboard walks you through the rest, one button per step: connect Alpaca, run the self-test, add your SEC contact, run the recommended swing backtest (2019 to now, 10–30 minutes the first time), and start paper trading. Each step ticks itself off. The detailed steps below cover the same ground.
+
+### Step 5: Settings
+1. Go to the **Settings** tab:
    - Paste your Alpaca **API Key ID** and **Secret Key**.
    - *(Recommended)* In **SEC contact**, type your name and email, e.g. `Jane Doe jane@example.com`. The SEC requires this to download insider-buying data. It is sent only to sec.gov.
    - *(Recommended)* Set up phone alerts (see below).
    - Click **Save settings**.
-4. The top bar should show **PAPER TRADING**, and **AI: ready** in green.
-5. **Run a backtest first** (see below), then click **Start Bot**. Leave the app open during market hours: 9:30 AM – 4:00 PM New York time, which is 2:30 – 9:00 PM UK time or 6:30 AM – 1:00 PM California time.
+2. The top bar should show **PAPER TRADING**, and **AI: ready** in green.
+3. **Run a backtest first** (see below), then click **Start Bot**. Leave the app open during market hours: 9:30 AM – 4:00 PM New York time, which is 2:30 – 9:00 PM UK time or 6:30 AM – 1:00 PM California time.
 
 ### Updates
 
-Eimeria updates itself from its GitHub repository ([catsandlights-ops/eimeria](https://github.com/catsandlights-ops/eimeria)):
+Eimeria updates itself from its GitHub repository ([catsandlights-ops/Eimeria](https://github.com/catsandlights-ops/Eimeria)):
 
 - It checks when it starts and every 6 hours (switch this off in **Settings → Updates**, which also has **Check for updates now**).
 - When a new version is out, an **Update available** button appears at the top. Click it to see what's new, then **Install and restart**.
@@ -78,7 +85,7 @@ Eimeria updates itself from its GitHub repository ([catsandlights-ops/eimeria](h
 - **Your `settings.yaml`, `.env` (keys), `trader.db` (trade history), `cache` and `logs` are never touched.**
 - The current version is backed up to `backups\` first. If anything goes wrong, it's restored automatically. **Settings → Updates → Roll back** goes back to the previous version at any time.
 - After the restart, a message says whether the update worked. Details are in `logs\update.log`.
-- If you use a standalone `Eimeria.exe` built with `build_exe.bat`, it can't replace itself. Update the normal install (`run.bat`) and rebuild the exe.
+- **Windows `Eimeria.exe`:** a few minutes after each release, GitHub builds and tests the new `Eimeria.exe` on a Windows machine and attaches it to the Releases page. The update is only offered once that build exists, and the new exe installs itself over the old one.
 
 ### Self-test: check everything works
 
@@ -344,7 +351,7 @@ The **Learning** tab shows progress on both. Paper trading continues normally wh
 | `app/gui/` | The window |
 
 **Optional extras:**
-- `run_tests.bat` runs the 48 automatic tests (fake broker and fake AI, no money involved).
+- `run_tests.bat` runs the 51 automatic tests (fake broker and fake AI, no money involved).
 - `build_exe.bat` builds a standalone `Eimeria.exe` in `dist\Eimeria`. Copy your `settings.yaml` and `.env` next to the exe.
 
 ## Security and reliability

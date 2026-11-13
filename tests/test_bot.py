@@ -1163,3 +1163,60 @@ def test_commit_based_updates(tmp_path, monkeypatch):
     info.update(commit="not-a-commit")
     with pytest.raises(ValueError, match="commit"):
         up.check()
+
+
+def test_windows_exe_update_flow(tmp_path, monkeypatch):
+    import io
+    import zipfile
+    from app import apply_update, config, updater
+    from app.updater import Updater, write_manifest
+    monkeypatch.setattr(updater, "is_frozen", lambda: True)
+    build = tmp_path / "build" / "Eimeria"
+    (build / "_internal").mkdir(parents=True)
+    (build / "Eimeria.exe").write_bytes(b"MZ new exe")
+    (build / "_internal" / "python312.dll").write_bytes(b"dll")
+    (build / "VERSION.txt").write_text("9.3.0")
+    write_manifest(build)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for p in build.rglob("*"):
+            if p.is_file():
+                z.writestr(f"Eimeria/{p.relative_to(build).as_posix()}", p.read_bytes())
+    asset = {"code": 404}
+    urls = []
+
+    class R:
+        def __init__(self, code=200, js=None, body=b""):
+            self.status_code, self._js, self.content = code, js, body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._js
+    info = {"version": "9.3.0", "commit": "a" * 40, "notes": ["exe"]}
+    monkeypatch.setattr(updater.requests, "get", lambda url, **k: urls.append(url) or (
+        R(js=info) if url.endswith("update.json") else R(body=buf.getvalue())))
+    monkeypatch.setattr(updater.requests, "head", lambda url, **k: R(code=asset["code"]))
+    up = Updater({"updates": {"repo": "catsandlights-ops/Eimeria", "branch": "claude/releases"}})
+    assert up.check() is None                                        # build not on GitHub yet: not offered
+    asset["code"] = 200
+    assert up.check()["version"] == "9.3.0"
+    staging = up.download(info)
+    assert urls[-1].endswith("/releases/download/v9.3.0/Eimeria-windows-9.3.0.zip")
+    assert (staging / "Eimeria.exe").read_bytes() == b"MZ new exe"
+    started = []
+    monkeypatch.setattr(updater.subprocess, "Popen", lambda args, **k: started.append(args))
+    monkeypatch.setattr(config, "BASE_DIR", tmp_path / "installed")
+    up.launch_installer(staging)
+    assert started[0][0] == str(staging / "Eimeria.exe") and started[0][1] == "--apply-update"
+    # The installer restarts the app as Eimeria.exe
+    target = tmp_path / "installed"
+    (target / "_internal").mkdir(parents=True)
+    (target / "Eimeria.exe").write_bytes(b"MZ old exe")
+    (target / "settings.yaml").write_text("mine")
+    restarted = []
+    monkeypatch.setattr(apply_update.subprocess, "Popen", lambda args, **k: restarted.append(args))
+    assert apply_update.main(["--source", str(staging), "--target", str(target), "--restart"]) == 0
+    assert (target / "Eimeria.exe").read_bytes() == b"MZ new exe" and (target / "settings.yaml").read_text() == "mine"
+    assert restarted == [[str(target / "Eimeria.exe")]]

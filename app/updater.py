@@ -44,9 +44,20 @@ MANIFEST = "MANIFEST.sha256"
 TAG_PATTERN = re.compile(r"^v\d{1,4}\.\d{1,4}\.\d{1,4}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 POINTER_FILES = {"update.json"}             # changes after a release is cut, so not in the fingerprint list
-MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024        # a release is ~0.5 MB; refuse anything absurd
-MAX_UNPACKED_BYTES = 200 * 1024 * 1024       # guards against "zip bombs"
-MAX_FILES = 5000
+# Source release ~0.5 MB; Windows build (Python + Qt inside) ~150-250 MB. Refuse anything absurd.
+MAX_DOWNLOAD_BYTES = 600 * 1024 * 1024
+MAX_UNPACKED_BYTES = 1500 * 1024 * 1024      # guards against "zip bombs"
+MAX_FILES = 20000
+
+
+def is_frozen() -> bool:
+    """True when running as the packaged Windows Eimeria.exe."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def windows_asset_url(repo: str, version: str) -> str:
+    """The Windows build is attached to a GitHub Release named v<version> by the build workflow."""
+    return f"https://github.com/{repo}/releases/download/v{version}/Eimeria-windows-{version}.zip"
 
 
 def parse_version(v: str) -> tuple[int, ...]:
@@ -77,7 +88,7 @@ def app_files(root: Path) -> list[Path]:
         rel = p.relative_to(root)
         if rel.parts[0] in PROTECTED or "__pycache__" in rel.parts or p.is_dir():
             continue
-        if rel.name == MANIFEST or rel.suffix in (".pyc", ".db") or rel.as_posix() in POINTER_FILES:
+        if rel.name == MANIFEST or rel.suffix == ".db" or rel.as_posix() in POINTER_FILES:
             continue
         out.append(rel)
     return out
@@ -113,8 +124,10 @@ def verify_manifest(root: Path) -> list[str]:
             continue
         digest, rel = line.split("  ", 1)
         f = root / rel
-        if ".." in Path(rel).parts or Path(rel).is_absolute():
+        norm = rel.replace("\\", "/")
+        if ".." in Path(norm).parts or Path(norm).is_absolute() or norm.startswith("/") or ":" in norm:
             problems.append(f"Unsafe path in manifest: {rel}")
+            continue
         elif not f.exists():
             problems.append(f"Missing file: {rel}")
         elif file_sha256(f) != digest:
@@ -146,13 +159,21 @@ class Updater:
         if not re.match(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$", str(info["version"])):
             raise ValueError(f"update.json has an invalid version: {info['version']!r}")
         archive_ref(info)                                 # raises if neither commit nor tag is valid
+        if is_frozen() and is_newer(info["version"]):
+            # The Windows build is made on GitHub a few minutes after a release is published:
+            # only offer the update once it's actually there.
+            h = requests.head(windows_asset_url(self.repo, info["version"]), timeout=20, allow_redirects=True)
+            if h.status_code != 200:
+                log.info("Update %s published, Windows build not ready yet", info["version"])
+                return None
         if not isinstance(info.get("notes", []), list):
             raise ValueError("update.json notes must be a list")
         return info if is_newer(info["version"]) else None
 
     def download(self, info: dict, progress=lambda m: None) -> Path:
         """Download and verify a release. Returns the staging folder containing the new app files."""
-        url = f"https://github.com/{self.repo}/archive/{archive_ref(info)}.zip"
+        url = windows_asset_url(self.repo, str(info["version"])) if is_frozen() else \
+            f"https://github.com/{self.repo}/archive/{archive_ref(info)}.zip"
         progress(f"Downloading Eimeria {info['version']}...")
         r = requests.get(url, timeout=180)
         r.raise_for_status()
@@ -183,12 +204,21 @@ class Updater:
         return staging
 
     def launch_installer(self, staging: Path, restart: bool = True) -> None:
-        """Start the helper that installs the update after Eimeria exits. The caller must then quit."""
-        helper_dir = Path(tempfile.mkdtemp(prefix="eimeria_helper_"))
-        helper = helper_dir / "apply_update.py"
-        shutil.copy2(Path(__file__).with_name("apply_update.py"), helper)
-        args = [python_for_helper(), str(helper), "--source", str(staging), "--target", str(config.BASE_DIR),
-                "--wait-pid", str(_pid()), "--from-version", VERSION]
+        """Start the helper that installs the update after Eimeria exits. The caller must then quit.
+        Windows .exe: the NEW version's own Eimeria.exe (in the staging folder) does the installing.
+        Normal install: a copy of apply_update.py run by the app's Python."""
+        common = ["--source", str(staging), "--target", str(config.BASE_DIR),
+                  "--wait-pid", str(_pid()), "--from-version", VERSION]
+        if is_frozen():
+            exe = staging / "Eimeria.exe"
+            if not exe.exists():
+                raise FileNotFoundError(f"{exe} is missing from the update")
+            args, helper_dir = [str(exe), "--apply-update", *common], staging
+        else:
+            helper_dir = Path(tempfile.mkdtemp(prefix="eimeria_helper_"))
+            helper = helper_dir / "apply_update.py"
+            shutil.copy2(Path(__file__).with_name("apply_update.py"), helper)
+            args = [python_for_helper(), str(helper), *common]
         if restart:
             args.append("--restart")
         flags = 0
@@ -205,6 +235,8 @@ class Updater:
 
 
 def _read_version(root: Path) -> str:
+    if (root / "VERSION.txt").exists():                   # Windows .exe builds (source code is compiled inside)
+        return (root / "VERSION.txt").read_text(encoding="utf-8").strip()
     m = re.search(r'VERSION = "([^"]+)"', (root / "app" / "version.py").read_text(encoding="utf-8")) \
         if (root / "app" / "version.py").exists() else None
     return m.group(1) if m else "unknown"
@@ -219,8 +251,8 @@ def python_for_helper() -> str:
 
 
 def can_self_update() -> bool:
-    """Self-update works for the normal install (run.bat). A PyInstaller .exe can't replace itself."""
-    return not getattr(sys, "frozen", False)
+    """Both the normal install (run.bat) and the Windows .exe can update themselves."""
+    return True
 
 
 def _pid() -> int:

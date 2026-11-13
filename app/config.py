@@ -15,7 +15,9 @@ import yaml
 from dotenv import load_dotenv, set_key
 
 # Folder that holds settings.yaml, .env, the database and logs.
-if getattr(sys, "frozen", False):  # running as a packaged .exe
+if os.environ.get("EIMERIA_HOME"):  # used by the build's smoke test (keeps test data out of the build)
+    BASE_DIR = Path(os.environ["EIMERIA_HOME"]).resolve()
+elif getattr(sys, "frozen", False):  # running as a packaged .exe
     BASE_DIR = Path(sys.executable).resolve().parent
 else:
     BASE_DIR = Path(__file__).resolve().parent.parent
