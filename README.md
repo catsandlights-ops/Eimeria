@@ -182,6 +182,23 @@ A published effect (Gao, Han, Li & Zhou, *Journal of Financial Economics*, 2018)
 
 ---
 
+## Four more strategies to test (fixed tests)
+
+Each is a well-researched idea built as a **backtest with rules fixed in advance**, like the S&P 500 test above. Pick it in the Backtest tab, keep the dates (2019 to yesterday), and read the first line: **PASS** or **FAIL**. To pass, a strategy must make money after costs **before 2024 and from 2024 on** (data it was never fitted to), strongly enough not to be luck (t-statistic of 2+, counted per month because overlapping trades aren't independent). A FAIL is dropped, not tuned. Live trading is added only for a strategy that passes.
+
+| Test | Rule (fixed) | Data |
+|---|---|---|
+| **Insider clusters and CEO/CFO buys** | Buy after (a) 3+ different insiders bought $100k+ within 14 days, or (b) the CEO or CFO bought $100k+; stock above its 50-day average; hold 40 trading days. Compared with the current $1M+ rule. | SEC insider records (needs your SEC contact) |
+| **Earnings drift** | Buy after a big earnings beat (this quarter's EPS vs a year earlier, 2+ times its usual variation), hold 60 trading days. Signal date: the day the quarterly report (10-Q) was filed. | SEC earnings data (needs your SEC contact; the first run downloads ~3,000 companies and takes about 10 minutes, then it's cached) |
+| **Momentum** | Each month, of the 500 most-traded stocks, hold the 50 that rose most from 12 months to 1 month ago. Must beat all 500 (not just the S&P 500). | Daily prices of ~1,500 stocks |
+| **Trend following** | Each month, each of 5 funds (US stocks SPY, foreign stocks EFA, Treasury bonds IEF, gold GLD, real estate VNQ) gets 1/5 of the money if it's above its 10-month average, otherwise Treasury bills (BIL). Passes if it gives a better return per unit of risk (Sharpe ratio) than holding the 5 funds in both periods AND a smaller worst drop. | Daily prices of 6 funds |
+
+**Honest caveats:** the stock lists are today's stocks, so companies that went bust are missing (this flatters results; momentum is compared with the same list to offset it). The insider variants come from published research, but the same SEC data was used to pick the current insider rule, so a PASS from 2024 on counts most.
+
+**Price data:** since version 0.4.0 backtests use prices **adjusted for stock splits and dividends**. Before, a 2-for-1 split looked like a 50% crash and a reverse split like a huge gain. **Re-run your swing backtest**: its results may change a little.
+
+---
+
 ## Swing trading
 
 **How it works:**

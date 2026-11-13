@@ -130,18 +130,21 @@ class AlpacaBroker:
     def bars(self, symbols: list[str], minutes: int = 5, days_back: int = 1) -> dict[str, pd.DataFrame]:
         """Recent intraday bars per symbol (live feed)."""
         start = datetime.now(timezone.utc) - timedelta(days=days_back)
-        return self._get_bars(symbols, start, None, minutes, None)
+        return self._get_bars(symbols, start, None, minutes, None, "split")
 
     def daily_bars(self, symbols: list[str], days: int = 40) -> dict[str, pd.DataFrame]:
         start = datetime.now(timezone.utc) - timedelta(days=days)
-        return self._get_bars(symbols, start, None, 0, None)
+        return self._get_bars(symbols, start, None, 0, None, "split")
 
     def bars_range(self, symbols, start: date, end: date, minutes: int = 5, feed: str | None = None):
         """Historical intraday bars between two dates (for backtesting)."""
-        return self._get_bars(symbols, *self._range(start, end), minutes, feed)
+        return self._get_bars(symbols, *self._range(start, end), minutes, feed, "split")
 
-    def daily_range(self, symbols, start: date, end: date, feed: str | None = None):
-        return self._get_bars(symbols, *self._range(start, end), 0, feed)
+    def daily_range(self, symbols, start: date, end: date, feed: str | None = None, adjustment: str = "all"):
+        """Daily history for backtests. "all" adjusts for splits AND dividends (otherwise a 2-for-1 split looks
+        like a 50% crash, a reverse split like a huge gain, and dividends are missing). "split" adjusts for
+        splits only, so prices can be compared with the prices in SEC filings."""
+        return self._get_bars(symbols, *self._range(start, end), 0, feed, adjustment)
 
     @staticmethod
     def _range(start: date, end: date):
@@ -151,7 +154,9 @@ class AlpacaBroker:
         e = min(e, datetime.now(timezone.utc) - timedelta(minutes=16))
         return s, e
 
-    def _get_bars(self, symbols, start, end, minutes, feed) -> dict[str, pd.DataFrame]:
+    def _get_bars(self, symbols, start, end, minutes, feed, adjustment: str = "split") -> dict[str, pd.DataFrame]:
+        """adjustment: "split" (prices comparable across splits) or "all" (also dividends, for backtests)."""
+        from alpaca.data.enums import Adjustment
         from alpaca.data.requests import StockBarsRequest
         from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
@@ -161,7 +166,7 @@ class AlpacaBroker:
         symbols = list(symbols)
         try:
             req = StockBarsRequest(symbol_or_symbols=symbols, start=start, end=end, timeframe=tf,
-                                   feed=self._feed(feed))
+                                   feed=self._feed(feed), adjustment=Adjustment(adjustment))
             return self._split(self.data.get_stock_bars(req).df)
         except Exception as e:
             # One unknown/delisted ticker can make the whole request fail. Split the list in half
@@ -172,8 +177,8 @@ class AlpacaBroker:
             if any(w in str(e).lower() for w in ("forbidden", "unauthorized", "subscription", "rate limit", "429")):
                 raise
             mid = len(symbols) // 2
-            return {**self._get_bars(symbols[:mid], start, end, minutes, feed),
-                    **self._get_bars(symbols[mid:], start, end, minutes, feed)}
+            return {**self._get_bars(symbols[:mid], start, end, minutes, feed, adjustment),
+                    **self._get_bars(symbols[mid:], start, end, minutes, feed, adjustment)}
 
     @staticmethod
     def _split(df: pd.DataFrame) -> dict[str, pd.DataFrame]:

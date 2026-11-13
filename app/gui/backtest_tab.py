@@ -50,9 +50,9 @@ class BacktestTab(QWidget):
         info = QLabel(
             "Replays past market data through the bot's rules, including trading costs. Swing: insider "
             "purchases from the SEC's records (2006 onward; needs your SEC contact in Settings) on daily prices. "
-            "Day trading: 5-minute prices. S&P 500 late-day momentum is a fixed, pre-registered test: pick it, "
-            "test 2019 to yesterday, and it says PASS or FAIL. The AI's news judgement can't be replayed, so it "
-            "isn't part of any test.")
+            "Tests marked 'fixed test' have rules set in advance: pick one, keep the dates (2019 to yesterday) and "
+            "it says PASS or FAIL (it must work before 2024 AND from 2024 on). Some download a lot of data the "
+            "first time. The AI's news judgement can't be replayed, so it isn't part of any test.")
         info.setWordWrap(True)
         info.setStyleSheet(f"color: {MUTED};")
         lay.addWidget(info)
@@ -74,7 +74,11 @@ class BacktestTab(QWidget):
         self.strategy.addItems(["Swing trading (daily bars, hold days-weeks)",
                                 "Day trading: chart signals (LOST money in testing)",
                                 "Day trading: confirmed gaps (LOST money in testing)",
-                                "Day trading: S&P 500 late-day momentum (SPY, 1 trade a day, fixed test)"])
+                                "Day trading: S&P 500 late-day momentum (SPY, 1 trade a day, fixed test)",
+                                "Swing: insider clusters and CEO/CFO buys (SEC data, fixed test)",
+                                "Swing: earnings drift after big earnings beats (SEC data, fixed test)",
+                                "Monthly: momentum, hold last year's 50 biggest winners (fixed test)",
+                                "Monthly: trend following across stocks, bonds, gold, real estate (fixed test)"])
         self.universe = QComboBox()
         self.universe.addItems(["My stock list", "My list + every stock insiders bought (slower)"])
         self.universe.setToolTip("Insider buying happens mostly in smaller companies. Testing only your list "
@@ -157,8 +161,8 @@ class BacktestTab(QWidget):
         self.universe.setEnabled(i in (0, 2))
         self.score.setEnabled(i == 1)
         self.apply_btn.setVisible(i == 1)                 # signal weights only exist for chart signals
-        self.symbols.setEnabled(i != 3)                   # the momentum test always uses SPY
-        if i == 3:                                        # the fair test: development years + unseen years
+        self.symbols.setEnabled(i < 3)                    # fixed tests choose their own stocks
+        if i >= 3:                                        # the fair test: development years + unseen years
             self.start.setDate(QDate(2019, 1, 2))
             self.end.setDate(QDate.currentDate().addDays(-1))
         self.universe.setItemText(1, "My list + every stock insiders bought (slower)" if i == 0 else
@@ -173,14 +177,15 @@ class BacktestTab(QWidget):
         syms = [x.strip().upper() for x in self.symbols.text().replace(";", ",").split(",") if x.strip()]
         start, end = self.start.date().toPython(), self.end.date().toPython()
         momentum = self.strategy.currentIndex() == 3
-        if momentum:
+        fixed = self.strategy.currentIndex() >= 4
+        if momentum or fixed:
             syms = ["SPY"]
         if not syms or end <= start:
             QMessageBox.warning(self, "Check inputs", "Enter some stocks and a valid date range.")
             return
         swing = self.strategy.currentIndex() == 0
         gap = self.strategy.currentIndex() == 2
-        max_days = 365 * 8 + 5 if swing or momentum else 365 * 5 if gap else 750
+        max_days = 365 * 8 + 5 if swing or momentum or fixed else 365 * 5 if gap else 750
         if (end - start).days > max_days or len(syms) > 80:
             QMessageBox.warning(self, "Too big", f"Please test at most {max_days // 365} years and 80 stocks "
                                                  "in your list at a time.")
@@ -193,7 +198,12 @@ class BacktestTab(QWidget):
         self.apply_btn.setEnabled(False)
         self.status.setText("Starting...")
         self._rec_run, self.recommended = self.recommended and swing, False
-        if momentum:
+        if fixed:
+            from .. import fixed_tests as ft
+            fn = [ft.run_insider_refinements, ft.run_earnings_drift, ft.run_momentum,
+                  ft.run_trend_following][self.strategy.currentIndex() - 4]
+            threading.Thread(target=self._work_fixed, args=(fn, eng.broker, settings, start, end), daemon=True).start()
+        elif momentum:
             threading.Thread(target=self._work_momentum, args=(eng.broker, settings, start, end), daemon=True).start()
         elif gap:
             threading.Thread(target=self._work_gap, args=(eng.broker, settings, syms, start, end,
@@ -216,6 +226,12 @@ class BacktestTab(QWidget):
             res = GapBacktester(settings).run(events, intraday, spy, start, end)
             res.notes = notes + res.notes
             self.bridge.done.emit(res, None)
+        except Exception as e:
+            self.bridge.done.emit(None, f"{e}\n" + traceback.format_exc(limit=2))
+
+    def _work_fixed(self, fn, broker, settings, start: date, end: date):
+        try:
+            self.bridge.done.emit(fn(broker, settings, start, end, self.bridge.progress.emit), None)
         except Exception as e:
             self.bridge.done.emit(None, f"{e}\n" + traceback.format_exc(limit=2))
 
@@ -281,7 +297,7 @@ class BacktestTab(QWidget):
         self.result_tabs.setCurrentIndex(0 if res.edge_table else 1)   # swing results have no edge table
         gap_result = bool(res.trades) and res.trades[0].get("setup") == "gap_confirmed" or \
             any("gap up" in r.get("band", "") or "gap down" in r.get("band", "") for r in res.edge_table)
-        momentum_result = bool(res.trades) and res.trades[0].get("setup") == "spy_momentum"
+        momentum_result = bool(res.headline)              # fixed tests: development vs holdout columns
         self.edge_table.horizontalHeaderItem(0).setText(
             "Rule" if momentum_result else "What happened in the first 30 min" if gap_result else "Signal strength")
         self.edge_table.horizontalHeaderItem(2).setText("Before 2024: avg after costs" if momentum_result

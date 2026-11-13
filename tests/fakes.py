@@ -96,7 +96,7 @@ class FakeBroker:
         return {**self.account(), "status": "ACTIVE", "trading_blocked": False, "account_blocked": False,
                 "multiplier": 2.0}
 
-    def daily_range(self, symbols, start, end, feed=None):
+    def daily_range(self, symbols, start, end, feed=None, adjustment="all"):
         return {s: make_daily(400.0, days=60) for s in symbols}
 
     def news_between(self, symbols, start, end, limit=30):

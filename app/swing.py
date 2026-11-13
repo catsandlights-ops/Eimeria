@@ -73,6 +73,22 @@ def liquid_ok(d: pd.DataFrame, i: int, cfg: dict) -> bool:
     return d["close"].iloc[i] >= cfg["min_price"] and (d["dollar_vol"].iloc[i] or 0) >= cfg["min_dollar_volume"]
 
 
+# Common stock-split ratios. Swing backtest prices are split-adjusted, but the SEC filing shows the price paid
+# on the day, so after e.g. a later 4-for-1 split the two differ by a factor of 4.
+SPLIT_FACTORS = (1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20, 25, 30, 40, 50, 100)
+
+
+def price_matches(filed_price: float, market_price: float) -> bool:
+    """True if a filing's price matches the market (allowing for later splits); False for typos or a ticker
+    that now belongs to a different company."""
+    if not (filed_price > 0 and market_price > 0):
+        return False
+    r = filed_price / market_price
+    if abs(r - 1) <= 0.5:
+        return True
+    return any(abs(r / f - 1) <= 0.10 or abs(r * f - 1) <= 0.10 for f in SPLIT_FACTORS[1:])
+
+
 # ------------------------------------------------------------------ setup detection
 def news_gap_events(px: dict[str, pd.DataFrame], cfg: dict, start: date, end: date) -> list[Event]:
     g = cfg["news_gap"]
@@ -111,7 +127,7 @@ def insider_events(purchases: pd.DataFrame, px: dict[str, pd.DataFrame], cfg: di
         i = d.index.searchsorted(pd.Timestamp(row["filed"]), side="right") - 1
         return d["close"].iloc[i] if i >= 0 else np.nan
     mkt = p.apply(market_close, axis=1)
-    p = p[(p["price"] / mkt - 1).abs() <= 0.5]
+    p = p[[price_matches(a, b) for a, b in zip(p["price"], mkt)]]
     p["ceo_cfo"] = p["title"].fillna("").str.upper().str.contains("CEO|CHIEF EXECUTIVE|CFO|CHIEF FINANCIAL|PRESIDENT")
     by_symbol = {sym: g for sym, g in p.groupby("symbol")}
     out = []

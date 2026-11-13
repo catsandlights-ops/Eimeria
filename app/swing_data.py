@@ -37,7 +37,8 @@ def load_swing_signals(broker, settings: dict, syms: list[str], start: date, end
         emit(f"Downloading daily prices {i}/{len(universe)} stocks...")
         daily.update(broker.daily_range(universe[i:i + 100], start - timedelta(days=320),
                                         end + timedelta(days=extra_days_after),
-                                        feed=settings["backtest"].get("data_feed", "sip")))
+                                        feed=settings["backtest"].get("data_feed", "sip"),
+                                        adjustment="split"))    # comparable with SEC filing prices
     spy = daily.pop("SPY", None)
     emit("Finding setups...")
     px = prepare(daily)

@@ -1488,3 +1488,173 @@ def test_spy_momentum_skips_early_close():
     cut = day2[~((day2.index.date == date(2024, 3, 5)) & (day2.index.hour >= 13))]   # 3/5 closes at 1 PM
     sig = daily_signals(cut.tz_convert("UTC"))
     assert [str(d) for d in sig["day"]] == ["2024-03-06"]             # 3/5 skipped, still gives 3/6 its prev close
+
+
+# ---------------------------------------------------------------- fixed (pre-registered) strategy tests
+def synth_market(n, seed=0, drift_sd=0.0, start=date(2017, 1, 2), end=None, bumps=None, base=50.0):
+    """Synthetic daily bars (UTC index, like Alpaca) for n stocks up to today. bumps: {sym: [(date, total_ret)]}
+    adds total_ret spread over the 40 trading days after each date."""
+    import numpy as np
+    import pandas as pd
+    rng = np.random.default_rng(seed)
+    end = end or date.today()
+    days = pd.bdate_range(start, end)
+    out = {}
+    for k in range(n):
+        sym = "S" + "".join(chr(65 + int(c)) for c in f"{k:03d}")
+        r = rng.normal(rng.normal(0, drift_sd) if drift_sd else 0.0, 0.012, len(days))
+        for d0, tot in (bumps or {}).get(sym, []):
+            j = days.searchsorted(pd.Timestamp(d0), side="right")
+            r[j:j + 40] += tot / 40
+        close = base * np.exp(np.cumsum(r))
+        open_ = close / np.exp(r) * (1 + rng.normal(0, 0.001, len(days)))
+        idx = (days + pd.Timedelta(hours=4)).tz_localize("UTC")
+        out[sym] = pd.DataFrame({"open": open_, "high": np.maximum(open_, close) * 1.005,
+                                 "low": np.minimum(open_, close) * 0.995, "close": close, "volume": 5e6}, index=idx)
+    return out
+
+
+class SynthBroker:
+    def __init__(self, data):
+        self.data = data
+
+    def tradable_symbols(self):
+        return list(self.data)
+
+    def daily_range(self, syms, start, end, feed=None, adjustment="all"):
+        import pandas as pd
+        out = {}
+        for s in syms:
+            if s in self.data:
+                d = self.data[s]
+                d = d[(d.index >= pd.Timestamp(start).tz_localize("UTC")) &
+                      (d.index <= pd.Timestamp(end).tz_localize("UTC") + pd.Timedelta(days=1))]
+                if len(d):
+                    out[s] = d
+        return out
+
+
+def test_research_verdicts():
+    from app.research import monthly_t, split_row, verdict_line
+    import numpy as np
+    days = [date(2019, 1, 1) + timedelta(days=7 * k) for k in range(380)]
+    rng = np.random.default_rng(0)
+    good = rng.normal(0.004, 0.01, len(days))
+    text, ok = verdict_line("X", good, days, 30)
+    assert ok and "PASS" in text and monthly_t(good, days) > 2
+    text, ok = verdict_line("X", rng.normal(-0.002, 0.01, len(days)), days, 30)
+    assert not ok and "not positive" in text
+    text, ok = verdict_line("X", good[:200], days[:200], 30)                      # nothing from 2024 on
+    assert not ok and "INCOMPLETE" in text
+    row = split_row("r", "long", good, days, 30)
+    assert row["n1"] + row["n2"] == len(days) and row["consistent"]
+
+
+def test_split_aware_insider_price_check():
+    from app.swing import price_matches
+    assert price_matches(100, 80) and price_matches(400, 101) and price_matches(10, 98)   # later 4:1 / 1:10 split
+    assert not price_matches(100, 38) and not price_matches(0, 10)
+
+
+def test_sec_earnings_surprise():
+    import pandas as pd
+    from app.sec_earnings import _quarterly, surprises
+    facts = [{"form": "10-Q", "start": "2020-01-01", "end": "2020-03-31", "filed": "2020-05-01", "val": 1.0},
+             {"form": "10-Q", "start": "2020-01-01", "end": "2020-06-30", "filed": "2020-08-01", "val": 2.2},  # 6 months
+             {"form": "10-K", "start": "2020-01-01", "end": "2020-12-31", "filed": "2021-02-01", "val": 4.0},
+             {"form": "10-Q", "start": "2020-01-01", "end": "2020-03-31", "filed": "2021-05-01", "val": 1.0}]  # re-stated
+    q = _quarterly(facts)
+    assert len(q) == 1 and q["filed"].iloc[0] == date(2020, 5, 1)
+    rows, eps = [], {}
+    for y in range(2015, 2022):
+        for qn, (m, d) in enumerate(((3, 31), (6, 30), (9, 30))):
+            eps[(y, qn)] = 1.0 + 0.01 * (y - 2015) * (1 if qn != 1 else -1) + (0.5 if (y, qn) == (2021, 0) else 0)
+            rows.append({"end": date(y, m, d), "filed": date(y, m, d) + timedelta(days=35), "val": eps[(y, qn)]})
+    su = surprises(pd.DataFrame(rows))
+    big = su[su["sue"].abs() >= 2]
+    assert date(2021, 3, 31) in set(big["end"])                                   # the planted jump
+    assert all(f > e for e, f in zip(su["end"], su["filed"]))
+
+
+def test_momentum_test_detects_momentum_and_rejects_noise():
+    from app.fixed_tests import run_momentum
+    s = copy.deepcopy(DEFAULTS)
+    with_mom = run_momentum(SynthBroker(synth_market(200, seed=1, drift_sd=0.0012)), s, date(2019, 1, 2),
+                            date(2026, 10, 30))
+    assert "Momentum: PASS" in with_mom.headline, with_mom.headline
+    assert with_mom.edge_table[0]["n1"] >= 50 and with_mom.edge_table[0]["n2"] >= 30
+    t = with_mom.trades[0]
+    assert t["exit_reason"] == "monthly rebalance" and t["entry_time"].date() >= date(2019, 1, 2)
+    noise = run_momentum(SynthBroker(synth_market(200, seed=2)), s, date(2019, 1, 2), date(2026, 10, 30))
+    assert "Momentum: FAIL" in noise.headline, noise.headline
+
+
+def test_trend_following_test_runs():
+    import numpy as np
+    from app.fixed_tests import TREND_ASSETS, TREND_CASH, run_trend_following
+    s = copy.deepcopy(DEFAULTS)
+    m = synth_market(len(TREND_ASSETS) + 1, seed=3)
+    data = dict(zip(list(TREND_ASSETS) + [TREND_CASH], m.values()))
+    spy = data["SPY"]                                                             # a long crash in 2020-2021
+    crash = (spy.index >= "2020-02-01") & (spy.index < "2021-06-01")
+    spy.loc[crash, ["open", "high", "low", "close"]] *= np.linspace(1, 0.4, crash.sum())[:, None]
+    res = run_trend_following(SynthBroker(data), s, date(2019, 1, 2), date(2026, 10, 30))
+    assert res.headline.startswith("PRE-REGISTERED TEST: Trend following:") and "worst drop" in res.headline
+    assert any("below its 10-month average" in t["exit_reason"] for t in res.trades)
+    assert len(res.edge_table) == 3 and res.stats["trades"] > 0
+
+
+def test_earnings_drift_test(monkeypatch):
+    import pandas as pd
+    import app.sec_earnings as se
+    from app.fixed_tests import run_earnings_drift
+    s = copy.deepcopy(DEFAULTS)
+    s["smart_money"]["sec_user_agent"] = "Test Runner research@example.com"
+    filings = {}
+    names = ["S" + "".join(chr(65 + int(c)) for c in f"{k:03d}") for k in range(40)]
+    for k, sym in enumerate(names):
+        filings[sym] = [date(y, m, 10 + k % 10) for y in range(2019, 2027) for m in (2, 5, 8, 11)
+                        if date(y, m, 28) < date.today() - timedelta(days=120)]
+    bumps = {sym: [(d, 0.06) for d in filings[sym]] for sym in names[:20]}       # beats drift up
+    data = synth_market(40, seed=4, bumps=bumps)
+    monkeypatch.setattr(se, "ticker_map", lambda cache, ua: {sym: i for i, sym in enumerate(names)})
+    monkeypatch.setattr(se, "eps_history", lambda ciks, cache, ua, emit=None: {sym: sym for sym in ciks})
+    monkeypatch.setattr(se, "surprises", lambda sym: pd.DataFrame(
+        {"end": filings[sym], "filed": filings[sym], "sue": [3.0 if sym in bumps else -3.0] * len(filings[sym])}))
+    res = run_earnings_drift(SynthBroker(data), s, date(2019, 1, 2), date(2026, 10, 30))
+    assert "Earnings drift: PASS" in res.headline, res.headline
+    assert res.edge_table[0]["bps1"] > 100 and res.edge_table[2]["side"] == "short"
+    assert {t["setup"] for t in res.trades} == {"earnings_beat"}
+    s["smart_money"]["sec_user_agent"] = ""
+    with pytest.raises(ValueError, match="SEC contact"):
+        run_earnings_drift(SynthBroker(data), s, date(2019, 1, 2), date(2026, 10, 30))
+
+
+def test_insider_refinements_test(monkeypatch):
+    import pandas as pd
+    import app.sec_history as sh
+    from app.fixed_tests import run_insider_refinements
+    s = copy.deepcopy(DEFAULTS)
+    s["smart_money"]["sec_user_agent"] = "Test Runner research@example.com"
+    names = ["S" + "".join(chr(65 + int(c)) for c in f"{k:03d}") for k in range(30)]
+    when = {sym: [date(y, m, 5 + k % 15) for y in range(2019, 2027) for m in (3, 9)
+                  if date(y, m, 28) < date.today() - timedelta(days=90)] for k, sym in enumerate(names)}
+    bumps = {sym: [(d, 0.08) for d in when[sym]] for sym in names[:15]}
+    data = synth_market(30, seed=6, drift_sd=0.0, bumps=bumps, base=60.0)
+    rows = []
+    for sym in names:
+        closes = data[sym]["close"]
+        for d in when[sym]:
+            px = float(closes[closes.index <= pd.Timestamp(d).tz_localize("UTC") + pd.Timedelta(hours=23)].iloc[-1])
+            n_ins = 3 if sym in bumps else 1
+            for j in range(n_ins):
+                rows.append({"symbol": sym, "filed": d, "owner": f"P{j}", "owner_id": f"{sym}{j}",
+                             "title": "Chief Executive Officer" if (j == 0 and sym in bumps) else "Director",
+                             "value": 60_000.0, "price": px})
+    monkeypatch.setattr(sh, "insider_history", lambda *a, **k: pd.DataFrame(rows))
+    s["swing"]["require_uptrend"] = False
+    res = run_insider_refinements(SynthBroker(data), s, date(2019, 1, 2), date(2026, 10, 30))
+    assert [r["band"].split(" (")[0] for r in res.edge_table] == [
+        "Current default: $1M+ by insiders", "Cluster buy: 3+ insiders, $100k+ in 14 days", "CEO or CFO bought $100k+"]
+    assert res.edge_table[1]["n1"] > 0 and res.edge_table[0]["n1"] == 0          # nobody bought $1M+
+    assert "Cluster buy: 3+ insiders, $100k+ in 14 days:" in res.headline
