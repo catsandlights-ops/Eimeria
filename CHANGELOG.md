@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1 (2026-11-13)
+- New in the AI tab: AI trader test. Your AI reads pre-market news for past days and decides buy, short or skip; it checks whether those trades would have made money (vs the S&P 500, after costs). The rules are fixed in advance, and the AI only gets to trade on its own if it passes.
+- Fix: if crash protection was switched from 'short' to another setting while holding the inverse fund (SH), Eimeria now sells it instead of leaving it behind.
+
 ## 0.4.0 (2026-11-13)
 - Four new strategy tests in the Backtest tab, each with rules fixed in advance and a PASS/FAIL result: insider clusters and CEO/CFO buys, earnings drift after big earnings beats, momentum (last year's winners), and trend following across stocks, bonds, gold and real estate.
 - Backtests now use prices adjusted for stock splits and dividends. Before, a split could look like a crash or a huge gain. Please re-run your swing backtest: results may change a little.
