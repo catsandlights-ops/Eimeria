@@ -1226,3 +1226,26 @@ def test_windows_exe_update_flow(tmp_path, monkeypatch):
     assert apply_update.main(["--source", str(staging), "--target", str(target), "--restart"]) == 0
     assert (target / "Eimeria.exe").read_bytes() == b"MZ new exe" and (target / "settings.yaml").read_text() == "mine"
     assert restarted == [[str(target / "Eimeria.exe")]]
+
+
+def test_alpaca_key_diagnosis():
+    from app.broker import diagnose_keys, is_auth_error
+    from app.config import clean_key
+    assert clean_key(" PKABC123​\n") == "PKABC123" and clean_key("'SeCrEt9'") == "SeCrEt9"
+    assert is_auth_error(Exception('{"message": "unauthorized."}'))
+
+    def factory(works_for_paper):
+        class Client:
+            def __init__(self, k, s, paper):
+                self.ok = paper == works_for_paper
+
+            def get_account(self):
+                if not self.ok:
+                    raise Exception("unauthorized.")
+        return Client
+    live_keys = diagnose_keys("AK" + "X" * 18, "s" * 40, paper=True, client_factory=factory(works_for_paper=False))
+    assert "LIVE-account keys" in live_keys and "'paper'" in live_keys
+    bad = diagnose_keys("PK" + "X" * 18, "s" * 40, paper=True, client_factory=factory(works_for_paper=None))
+    assert "older" in bad and "20 characters" in bad and "s" * 10 not in bad     # never shows the secret
+    swapped = diagnose_keys("s" * 40, "PK" + "X" * 18, paper=True, client_factory=factory(works_for_paper=None))
+    assert "swapped" in swapped

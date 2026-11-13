@@ -14,6 +14,40 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 
+def is_auth_error(e: Exception) -> bool:
+    t = str(e).lower()
+    return any(w in t for w in ("unauthorized", "forbidden", "401", "403"))
+
+
+def diagnose_keys(api_key: str, secret_key: str, paper: bool, client_factory=None) -> str:
+    """Plain-English explanation of why Alpaca rejected these keys. Only does read-only account checks."""
+    if client_factory is None:
+        from alpaca.trading.client import TradingClient
+        client_factory = TradingClient
+    mode, other = ("paper", "live") if paper else ("live", "paper")
+    tips = []
+    if len(api_key) > len(secret_key):
+        tips.append("The Key ID is longer than the Secret Key: they're probably swapped. The Key ID is the "
+                    "shorter one (about 20 characters).")
+    if api_key[:2] == "AK" and paper:
+        tips.append("The Key ID starts with 'AK', which is how LIVE keys usually start; paper keys usually start "
+                    "with 'PK'.")
+    if api_key[:2] == "PK" and not paper:
+        tips.append("The Key ID starts with 'PK', which is how PAPER keys usually start, but Mode is live.")
+    try:                                   # do these keys work for the OTHER kind of account? (read-only)
+        client_factory(api_key, secret_key, paper=not paper).get_account()
+        return (f"These are {other.upper()}-account keys, but Mode is set to '{mode}'. Either generate keys on "
+                f"your Alpaca {mode.upper()} dashboard (account switcher, top left), or change Mode in Settings.")
+    except Exception:
+        pass
+    tips.append(f"Alpaca rejected these keys for the {mode} account. Most likely: the Secret Key is from an older "
+                f"generation (each 'Generate/Regenerate' makes the previous secret stop working), or part of a key "
+                f"wasn't copied. On alpaca.markets, check the switcher says {mode.capitalize()}, click Regenerate, "
+                f"and copy BOTH new values.")
+    tips.append(f"Key ID entered: {api_key[:4]}... ({len(api_key)} characters); Secret: {len(secret_key)} characters.")
+    return "\n\n".join(tips)
+
+
 class AlpacaBroker:
     def __init__(self, api_key: str, secret_key: str, paper: bool = True, feed: str = "iex"):
         from alpaca.data.historical import StockHistoricalDataClient

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 (2026-11-13)
+- Alpaca keys: spaces, line breaks and invisible characters picked up when copying are removed automatically
+- If Alpaca rejects your keys, Eimeria now explains why: paper vs live keys, swapped Key ID and Secret, or an outdated secret
+
 ## 0.2.1 (2026-11-13)
 - Fix: the Windows app now finds new versions (GitHub's download links refused the quick 'is it there yet?' check)
 

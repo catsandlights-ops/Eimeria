@@ -255,10 +255,17 @@ def save_settings(settings: dict) -> None:
 
 def load_keys() -> tuple[str, str]:
     load_dotenv(ENV_PATH, override=True)
-    return os.getenv("ALPACA_API_KEY", "").strip(), os.getenv("ALPACA_SECRET_KEY", "").strip()
+    return clean_key(os.getenv("ALPACA_API_KEY", "")), clean_key(os.getenv("ALPACA_SECRET_KEY", ""))
+
+
+def clean_key(text: str) -> str:
+    """Alpaca keys are letters and digits only. Copying from a web page can add spaces, line breaks,
+    quotes or invisible characters, which make Alpaca reject the key: drop them all."""
+    import re
+    return re.sub(r"[^A-Za-z0-9]", "", text or "")
 
 
 def save_keys(api_key: str, secret_key: str) -> None:
     ENV_PATH.touch(exist_ok=True)
-    set_key(str(ENV_PATH), "ALPACA_API_KEY", api_key.strip())
-    set_key(str(ENV_PATH), "ALPACA_SECRET_KEY", secret_key.strip())
+    set_key(str(ENV_PATH), "ALPACA_API_KEY", clean_key(api_key))
+    set_key(str(ENV_PATH), "ALPACA_SECRET_KEY", clean_key(secret_key))

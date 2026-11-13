@@ -546,6 +546,15 @@ class MainWindow(QMainWindow):
             self.engine = None
             self.log(f"Not connected: {e}", logging.WARNING)
             self.tabs.setCurrentIndex(self.tabs.count() - 1)
+            from ..broker import diagnose_keys, is_auth_error
+            if is_auth_error(e):
+                key, secret = config.load_keys()
+                try:
+                    why = diagnose_keys(key, secret, paper=self.ctx.settings["mode"] != "live")
+                except Exception as ex:                       # never let the diagnosis itself break anything
+                    why = f"(Couldn't check further: {ex})"
+                self.log("Why: " + why.replace("\n\n", " "), logging.WARNING)
+                QMessageBox.warning(self, "Alpaca didn't accept the keys", why)
             return
         self.log(f"Connected to Alpaca ({self.ctx.settings['mode'].upper()} account).")
         self.getting_started.refresh()
