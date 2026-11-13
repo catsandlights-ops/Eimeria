@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.1 (2026-11-13)
+- Fix: the Windows app now finds new versions (GitHub's download links refused the quick 'is it there yet?' check)
+
 ## 0.2.0 (2026-11-13)
 - Windows app: download Eimeria-windows-0.2.0.zip from the Releases page, unzip, and run Eimeria.exe - no Python needed
 - The Windows app updates itself too: each release is built and tested on Windows by GitHub, and the update is offered once that build is ready

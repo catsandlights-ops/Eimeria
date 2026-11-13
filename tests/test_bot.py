@@ -1182,7 +1182,7 @@ def test_windows_exe_update_flow(tmp_path, monkeypatch):
         for p in build.rglob("*"):
             if p.is_file():
                 z.writestr(f"Eimeria/{p.relative_to(build).as_posix()}", p.read_bytes())
-    asset = {"code": 404}
+    asset = {"code": 401}                                    # how GitHub answers before it exists
     urls = []
 
     class R:
@@ -1195,9 +1195,15 @@ def test_windows_exe_update_flow(tmp_path, monkeypatch):
         def json(self):
             return self._js
     info = {"version": "9.3.0", "commit": "a" * 40, "notes": ["exe"]}
-    monkeypatch.setattr(updater.requests, "get", lambda url, **k: urls.append(url) or (
-        R(js=info) if url.endswith("update.json") else R(body=buf.getvalue())))
-    monkeypatch.setattr(updater.requests, "head", lambda url, **k: R(code=asset["code"]))
+    def fake_get(url, **k):
+        urls.append(url)
+        if url.endswith("update.json"):
+            return R(js=info)
+        if k.get("headers", {}).get("Range"):                       # "is the Windows build there yet?"
+            return R(code=asset["code"])
+        return R(body=buf.getvalue())
+    monkeypatch.setattr(updater.requests, "get", fake_get)
+    monkeypatch.setattr(R, "close", lambda self: None, raising=False)
     up = Updater({"updates": {"repo": "catsandlights-ops/Eimeria", "branch": "claude/releases"}})
     assert up.check() is None                                        # build not on GitHub yet: not offered
     asset["code"] = 200

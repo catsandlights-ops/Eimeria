@@ -162,8 +162,12 @@ class Updater:
         if is_frozen() and is_newer(info["version"]):
             # The Windows build is made on GitHub a few minutes after a release is published:
             # only offer the update once it's actually there.
-            h = requests.head(windows_asset_url(self.repo, info["version"]), timeout=20, allow_redirects=True)
-            if h.status_code != 200:
+            # (A HEAD request doesn't work here: GitHub's signed download links refuse it with 401.
+            #  Ask for just the first byte instead.)
+            h = requests.get(windows_asset_url(self.repo, info["version"]), timeout=20, stream=True,
+                             headers={"Range": "bytes=0-0"})
+            h.close()
+            if h.status_code not in (200, 206):
                 log.info("Update %s published, Windows build not ready yet", info["version"])
                 return None
         if not isinstance(info.get("notes", []), list):
