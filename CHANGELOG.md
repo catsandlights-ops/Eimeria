@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0 (2026-11-13)
+- Four new strategy tests in the Backtest tab, each with rules fixed in advance and a PASS/FAIL result: insider clusters and CEO/CFO buys, earnings drift after big earnings beats, momentum (last year's winners), and trend following across stocks, bonds, gold and real estate.
+- Backtests now use prices adjusted for stock splits and dividends. Before, a split could look like a crash or a huge gain. Please re-run your swing backtest: results may change a little.
+- Live trading is only added for strategies that pass.
+
 ## 0.3.2 (2026-11-13)
 - Day trading removed from Settings: every version tested on real data lost money (chart signals, confirmed gaps, S&P 500 late-day momentum). It's switched off even if it was on before. The strategies can still be backtested.
 
