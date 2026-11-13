@@ -143,17 +143,43 @@ class Updater:
     def repo(self) -> str:
         return self.cfg.get("repo", "")
 
+    last_status = ""                         # plain-English result of the last check (for the UI)
+
+    def fetch_info(self) -> dict | None:
+        """The published update.json (or None if nothing is published). Tries raw.githubusercontent.com
+        first, then GitHub's API (some networks block one of them)."""
+        import base64
+        branch = self.cfg.get("branch", "claude/releases")
+        errors = []
+        try:
+            r = requests.get(f"https://raw.githubusercontent.com/{self.repo}/refs/heads/{branch}/update.json",
+                             timeout=20, headers={"Cache-Control": "no-cache"})
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            errors.append(f"raw.githubusercontent.com: {e}")
+        try:
+            r = requests.get(f"https://api.github.com/repos/{self.repo}/contents/update.json",
+                             params={"ref": branch}, timeout=20, headers={"Accept": "application/vnd.github+json"})
+            if r.status_code == 404:
+                return None
+            r.raise_for_status()
+            return json.loads(base64.b64decode(r.json()["content"]).decode("utf-8"))
+        except Exception as e:
+            errors.append(f"api.github.com: {e}")
+        raise ConnectionError("Couldn't reach GitHub to check for updates. " + " | ".join(errors))
+
     def check(self) -> dict | None:
         """Returns the update info if a newer version is published, else None."""
         if not self.repo:
+            self.last_status = "No update source is set (Settings > Updates)."
             return None
-        branch = self.cfg.get("branch", "claude/releases")
-        url = f"https://raw.githubusercontent.com/{self.repo}/refs/heads/{branch}/update.json"
-        r = requests.get(url, timeout=20, headers={"Cache-Control": "no-cache"})
-        if r.status_code == 404:
-            return None                      # nothing published yet
-        r.raise_for_status()
-        info = r.json()
+        info = self.fetch_info()
+        if info is None:
+            self.last_status = f"Nothing is published yet at {self.repo} ({self.cfg.get('branch')})."
+            return None
         if not isinstance(info, dict) or "version" not in info:
             raise ValueError("update.json is malformed")
         if not re.match(r"^\d{1,4}\.\d{1,4}\.\d{1,4}$", str(info["version"])):
@@ -169,10 +195,15 @@ class Updater:
             h.close()
             if h.status_code not in (200, 206):
                 log.info("Update %s published, Windows build not ready yet", info["version"])
+                self.last_status = (f"Version {info['version']} is published; its Windows build isn't ready yet "
+                                    f"(usually ready within 15 minutes).")
                 return None
         if not isinstance(info.get("notes", []), list):
             raise ValueError("update.json notes must be a list")
-        return info if is_newer(info["version"]) else None
+        newer = is_newer(info["version"])
+        self.last_status = (f"Version {info['version']} is available (you have {VERSION})." if newer else
+                            f"You have the latest version (Eimeria {VERSION}; newest published: {info['version']}).")
+        return info if newer else None
 
     def download(self, info: dict, progress=lambda m: None) -> Path:
         """Download and verify a release. Returns the staging folder containing the new app files."""

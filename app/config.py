@@ -243,6 +243,15 @@ def load_settings() -> dict:
                                     f"default settings are being used. Your keys (.env) and trades are unaffected.")
             user = {}
     settings = _deep_merge(DEFAULTS, user)
+    # Early versions published updates on "main" (now on "claude/releases"): fix stale saved values,
+    # otherwise the app keeps checking a place where nothing is ever published.
+    upd = settings.setdefault("updates", {})
+    if upd.get("branch") == "main" or (str(upd.get("repo", "")).lower() == "catsandlights-ops/eimeria"
+                                        and upd.get("repo") != DEFAULTS["updates"]["repo"]):
+        upd["repo"] = DEFAULTS["updates"]["repo"]
+        upd["branch"] = DEFAULTS["updates"]["branch"]
+        if SETTINGS_PATH.exists():
+            save_settings(settings)
     if not SETTINGS_PATH.exists():
         save_settings(settings)
     return settings

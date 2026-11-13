@@ -27,7 +27,7 @@ class UpdateManager:
         self.info = None
         self.bridge = UpdateBridge()
         self.bridge.found.connect(self._found)
-        self.bridge.failed.connect(lambda m: self.win.log(f"Update check failed: {m}", 30))
+        self.bridge.failed.connect(self._failed)
         self.timer = QTimer(window)
         self.timer.timeout.connect(lambda: self.check(silent=True))
         self.timer.start(6 * 3600 * 1000)            # check every 6 hours while the app is open
@@ -40,9 +40,17 @@ class UpdateManager:
 
     def _work(self):
         try:
-            self.bridge.found.emit(Updater(self.win.ctx.settings).check())
+            up = Updater(self.win.ctx.settings)
+            info = up.check()
+            self.status_text = up.last_status
+            self.bridge.found.emit(info)
         except Exception as e:
             self.bridge.failed.emit(str(e))
+
+    def _failed(self, msg):
+        self.win.log(f"Update check failed: {msg}", 30)
+        if not getattr(self, "_silent", True):          # the user clicked "Check now": always answer
+            QMessageBox.warning(self.win, "Updates", f"The update check failed:\n\n{msg}")
 
     def _found(self, info):
         self.info = info
@@ -53,8 +61,10 @@ class UpdateManager:
             self.win.log(f"Update available: Eimeria {info['version']} (you have {VERSION}).")
         else:
             btn.hide()
+            text = getattr(self, "status_text", "") or f"You have the latest version (Eimeria {VERSION})."
+            self.win.log(f"Update check: {text}")
             if not getattr(self, "_silent", True):
-                QMessageBox.information(self.win, "Updates", f"You have the latest version (Eimeria {VERSION}).")
+                QMessageBox.information(self.win, "Updates", text)
 
     def open_dialog(self):
         if self.info:

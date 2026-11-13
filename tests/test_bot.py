@@ -791,6 +791,9 @@ def test_self_test(settings, journal, monkeypatch, tmp_path):
     sec_code = {"v": 200}
     monkeypatch.setattr(selftest.requests, "get", lambda *a, **k: Resp(sec_code["v"]))
     monkeypatch.setattr(selftest.requests, "head", lambda *a, **k: Resp(200))
+    from app import updater as _upd
+    from app.version import VERSION as _V
+    monkeypatch.setattr(_upd.Updater, "fetch_info", lambda self: {"version": _V, "commit": "a" * 40, "notes": []})
     broker = FakeBroker()
     broker.bar_data["SPY"] = make_bars(0.01, start_price=500)
     broker.quotes["SPY"] = {"bid": 500.0, "ask": 500.02}
@@ -1249,3 +1252,33 @@ def test_alpaca_key_diagnosis():
     assert "older" in bad and "20 characters" in bad and "s" * 10 not in bad     # never shows the secret
     swapped = diagnose_keys("s" * 40, "PK" + "X" * 18, paper=True, client_factory=factory(works_for_paper=None))
     assert "swapped" in swapped
+
+
+def test_stale_update_settings_are_fixed_and_check_falls_back(tmp_path, monkeypatch):
+    import base64
+    import json as _json
+    from app import config, updater
+    monkeypatch.setattr(config, "SETTINGS_PATH", tmp_path / "settings.yaml")
+    (tmp_path / "settings.yaml").write_text("updates:\n  repo: catsandlights-ops/eimeria\n  branch: main\n")
+    s = config.load_settings()
+    assert s["updates"]["branch"] == "claude/releases" and s["updates"]["repo"] == "catsandlights-ops/Eimeria"
+    assert "claude/releases" in (tmp_path / "settings.yaml").read_text()          # saved, fixed for good
+    info = {"version": "9.9.9", "commit": "b" * 40, "notes": ["n"]}
+
+    class R:
+        def __init__(self, js):
+            self.status_code, self._js = 200, js
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._js
+
+    def fake_get(url, **k):
+        if "raw.githubusercontent.com" in url:
+            raise ConnectionError("blocked by this network")
+        return R({"content": base64.b64encode(_json.dumps(info).encode()).decode()})
+    monkeypatch.setattr(updater.requests, "get", fake_get)
+    up = updater.Updater(s)
+    assert up.check()["version"] == "9.9.9" and "available" in up.last_status

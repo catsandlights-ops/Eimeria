@@ -201,6 +201,18 @@ def run_self_test(engine, settings: dict, order_test: bool, progress=lambda m: N
                       f"broker accepted it ({status}), then cancelled it.")
     check("Order placement (paper)", orders)
 
+    # ---------------------------------------------------------------- updates
+    def updates():
+        from .updater import Updater
+        from .version import VERSION
+        up = Updater(settings)
+        info = up.fetch_info()
+        if not info:
+            return WARN, f"Nothing published at {up.repo} ({up.cfg.get('branch')}). Check Settings > Updates."
+        up.check()
+        return PASS, f"GitHub reachable; {up.last_status} (source: {up.repo}, {up.cfg.get('branch')}; you have {VERSION})."
+    check("Updates (GitHub)", updates)
+
     # ---------------------------------------------------------------- PC
     def awake():
         if sys.platform != "win32":
