@@ -30,6 +30,7 @@ from .learner import Learner
 from .news import NewsReader, clean_text, headline_lines
 from .risk import RiskManager
 from .smart_money import InsiderTracker
+from .gap_live import SETUP as GAP_SETUP, GapTrader
 from .swing_live import SwingTrader
 
 log = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class Engine:
         self.learner = Learner(journal, settings["learning"], settings["risk"]["min_confidence"])
         self.alerts = Alerter(settings["alerts"], self.emit)
         self.swing = SwingTrader(self)
+        self.gap = GapTrader(self)
         self._stop = threading.Event()
         self._task_lock = threading.Lock()
         self._manage_lock = threading.Lock()
@@ -131,7 +133,7 @@ class Engine:
         tasks = {"briefing": self.premarket_briefing, "scan": lambda: self.scan(force=True),
                  "review": self.post_close_review, "insiders": self.refresh_insiders,
                  "refresh": self.refresh_account, "protect": lambda: self.check_protection(force=True),
-                 "swing_plan": self.swing.plan}
+                 "swing_plan": self.swing.plan, "gap": self.gap.decide_and_trade}
         threading.Thread(target=self._guarded, args=(tasks[name],), daemon=True).start()
 
     def _guarded(self, fn):
@@ -209,6 +211,13 @@ class Engine:
                 if self.s["day_trading"]["enabled"] and \
                         time.time() - self._last_scan >= self.s["scan_interval_minutes"] * 60:
                     self._run_locked(self.scan)
+            gp = self.s.get("gap_trading", {})
+            if gp.get("enabled") and mins_to_close > self.s["schedule"]["close_all_minutes_before_close"]:
+                if now.strftime("%H:%M") >= gp["decision_time"] and now.hour < 12 \
+                        and self.journal.get("gap_done") != today:
+                    self.journal.set("gap_done", today)
+                    self._run_locked(self.gap.decide_and_trade)
+                self.gap.exits()
             sw = self.s["swing"]
             if sw["enabled"]:
                 hhmm = now.strftime("%H:%M")
@@ -364,7 +373,8 @@ class Engine:
             by_sym = {p["symbol"]: p for p in positions}
             for t in self.journal.open_trades():
                 p = by_sym.get(t["symbol"])
-                if not p or p["side"] != t["side"] or not t["entry_price"] or t["style"] != "day":
+                if not p or p["side"] != t["side"] or not t["entry_price"] or t["style"] != "day" \
+                        or t["setup"] == GAP_SETUP:          # gap trades have their own tested exit rules
                     continue
                 try:
                     self._manage_one(t, p)
@@ -740,7 +750,10 @@ Return JSON: {{"action": "buy" | "short" | "skip", "confidence": 0.0-1.0, "reaso
         """Reason real-money trading is locked for this style ('day' or 'swing'), or None."""
         if self.s["mode"] != "live" or not self.s["edge_gate"]["enabled"]:
             return None
-        rep = self.edge_status() if style == "day" else self.learner.swing_edge_report(self.s["edge_gate"])
+        if style == "gap":
+            rep = self.learner.gap_edge_report(self.s["edge_gate"])
+        else:
+            rep = self.edge_status() if style == "day" else self.learner.swing_edge_report(self.s["edge_gate"])
         return None if rep["passed"] else "; ".join(rep["reasons"])
 
     # ------------------------------------------------------------------ reports

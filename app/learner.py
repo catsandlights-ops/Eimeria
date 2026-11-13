@@ -188,16 +188,27 @@ class Learner:
 
     def swing_edge_report(self, gate: dict) -> dict:
         """Swing trades take weeks, so they're judged on closed PAPER swing trades over a longer window."""
-        since = (datetime.now(timezone.utc) - timedelta(days=gate["swing_lookback_days"])).isoformat()
-        t = self.journal.closed_trades_since(since, mode="paper", style="swing")
+        return self.paper_report(gate, gate["swing_lookback_days"], gate["swing_min_paper_trades"], style="swing",
+                                 label="paper swing trades")
+
+    def gap_edge_report(self, gate: dict) -> dict:
+        return self.paper_report(gate, gate["gap_lookback_days"], gate["gap_min_paper_trades"],
+                                 setup="gap_confirmed", label="paper gap trades")
+
+    def paper_report(self, gate: dict, lookback_days: int, min_trades: int, style: str | None = None,
+                     setup: str | None = None, label: str = "paper trades") -> dict:
+        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
+        t = self.journal.closed_trades_since(since, mode="paper", style=style)
+        if setup:
+            t = [x for x in t if x["setup"] == setup]
         wins = sum(x["pnl"] for x in t if x["pnl"] > 0)
         losses = -sum(x["pnl"] for x in t if x["pnl"] <= 0)
         pf = wins / losses if losses > 0 else (float("inf") if wins else 0.0)
         reasons = []
-        if len(t) < gate["swing_min_paper_trades"]:
-            reasons.append(f"{len(t)}/{gate['swing_min_paper_trades']} closed paper swing trades")
+        if len(t) < min_trades:
+            reasons.append(f"{len(t)}/{min_trades} closed {label}")
         elif pf < gate["min_profit_factor"]:
-            reasons.append(f"paper swing profit factor {pf:.2f} is below {gate['min_profit_factor']:.2f}")
+            reasons.append(f"{label} profit factor {pf:.2f} is below {gate['min_profit_factor']:.2f}")
         return {"passed": not reasons, "reasons": reasons, "trades": len(t), "profit_factor": pf}
 
     # --------------------------------------------------------------- lessons

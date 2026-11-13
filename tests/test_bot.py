@@ -1309,3 +1309,93 @@ def test_update_result_shown_once_even_with_old_copy(tmp_path, monkeypatch):
     update_dialog.show_last_update_result(None)
     update_dialog.show_last_update_result(None)                     # next start: nothing again
     assert shown == ["Updated from 0.2.3 to 0.2.4."] and not (tmp_path / "last_update.json").exists()
+
+
+# ---------------------------------------------------------------- confirmed-gap day trading
+def gap_day_bars(open_px, step, n=78, day=DAY, dip=0.0):
+    import numpy as np
+    import pandas as pd
+    idx = [day.replace(hour=9, minute=30) + timedelta(minutes=5 * k) for k in range(n)]
+    close = open_px + step * np.arange(1, n + 1)
+    low = close - 0.1
+    low[3] -= dip                                     # optional dip inside the first 30 minutes
+    return pd.DataFrame({"open": np.r_[open_px, close[:-1]], "high": close + 0.1, "low": low, "close": close,
+                         "volume": 50_000.0}, index=pd.DatetimeIndex(idx).tz_convert("UTC"))
+
+
+def test_gap_decision_rule():
+    from app.gap import GapEvent, decide, session_bars
+    cfg = DEFAULTS["gap_trading"]
+    ev = GapEvent("X", DAY.date(), 100.0, 0.03, 5e7)
+    up = decide(ev, session_bars(gap_day_bars(103, 0.05, dip=0.5), DAY.date()), cfg)
+    assert up["confirmed"] and up["side"] == "long"
+    assert up["stop"] == pytest.approx(103 + 0.05 * 4 - 0.1 - 0.5)                 # lowest low of first 30 min
+    down = decide(ev, session_bars(gap_day_bars(103, -0.05), DAY.date()), cfg)
+    assert not down["confirmed"]
+    wide = decide(ev, session_bars(gap_day_bars(103, 0.05, dip=20), DAY.date()), cfg)
+    assert wide["stop"] == pytest.approx(wide["entry_ref"] * (1 - cfg["max_stop_pct"]))   # capped at 4%
+
+
+def test_gap_backtest():
+    from app.gap import GapBacktester, GapEvent, session_bars
+    s = copy.deepcopy(DEFAULTS)
+    d1, d2 = DAY.date(), (DAY + timedelta(days=1)).date()
+    day2 = DAY + timedelta(days=1)
+    ev = [GapEvent("GO", d1, 100, 0.03, 5e7), GapEvent("FADE", d1, 100, 0.03, 5e7),
+          GapEvent("STOP", d2, 100, 0.03, 5e7)]
+    crash = gap_day_bars(103, 0.05, day=day2)
+    crash.iloc[9, crash.columns.get_loc("low")] = 90.0                               # falls through the stop
+    intraday = {("GO", d1): session_bars(gap_day_bars(103, 0.05), d1),
+                ("FADE", d1): session_bars(gap_day_bars(103, -0.05), d1),
+                ("STOP", d2): session_bars(crash, d2)}
+    res = GapBacktester(s).run(ev, intraday, None, d1, d2)
+    t = {x["symbol"]: x for x in res.trades}
+    assert set(t) == {"GO", "STOP"}                                                   # the reversed gap is skipped
+    assert t["GO"]["exit_reason"] == "time exit" and t["GO"]["pnl"] > 0
+    assert (t["GO"]["exit_time"] - t["GO"]["entry_time"]) == timedelta(minutes=60)
+    assert t["STOP"]["exit_reason"] == "stop" and t["STOP"]["pnl"] < 0
+    assert any(r["band"].startswith("gap up, kept going") for r in res.edge_table)
+
+
+def test_gap_live_trading(journal):
+    import pandas as pd
+    s = copy.deepcopy(DEFAULTS)
+    s["alerts"]["desktop"] = False
+    s["gap_trading"].update(enabled=True, use_ai_review=False)
+    s["watchlist"] = []
+    broker = FakeBroker()
+    broker.bar_data = {"GAPX": gap_day_bars(103, 0.05, n=8), "REVX": gap_day_bars(103, -0.05, n=8),
+                       "TINY": gap_day_bars(3.1, 0.01, n=8)}
+    broker.movers = lambda top=10: ["GAPX", "REVX", "TINY"]
+
+    def daily(symbols, days=40):
+        out = {}
+        for sym in symbols:
+            df = make_daily(100.0 if sym != "TINY" else 3.0, end=DAY, days=25)
+            df["volume"] = 1_000_000.0
+            out[sym] = df
+        return out
+    broker.daily_bars = daily
+    eng = engine(s, journal, broker)
+    eng.gap.decide_and_trade(today=DAY.date())
+    assert [o[0] for o in broker.orders] == ["GAPX"]                                 # only the confirmed, liquid gap
+    sym, qty, side, stop, target = broker.orders[0]
+    assert side == "long" and stop < 103.4 < target
+    t = journal.open_trades()[0]
+    assert t["setup"] == "gap_confirmed" and t["style"] == "day"
+    eng.gap.exits(now=datetime.fromisoformat(t["entry_time"]) + timedelta(minutes=30))
+    assert broker.closed == []
+    eng.gap.exits(now=datetime.fromisoformat(t["entry_time"]) + timedelta(minutes=61))
+    assert broker.closed == ["GAPX"]
+    # Real money stays locked without paper evidence; kill switch blocks everything
+    s["mode"] = "live"
+    broker.orders.clear()
+    broker.held.clear()
+    journal._exec("DELETE FROM trades")
+    eng.gap.decide_and_trade(today=DAY.date())
+    assert broker.orders == [] and "paper gap trades" in eng.live_locked("gap")
+    s["mode"] = "paper"
+    eng.risk.halted_reason = "Kill switch used."
+    eng.gap.decide_and_trade(today=DAY.date())
+    assert broker.orders == []
+    _ = pd

@@ -117,6 +117,22 @@ DEFAULTS: dict = {
     # Intraday scans + trades (closed before 4 PM). Off by default: on real data the
     # day-trading signals did not beat trading costs. Switch on in Settings > Strategies.
     "day_trading": {"enabled": False},
+    # Confirmed-gap day trading: buy stocks that gap up >= 2% on overnight news AND keep rising for the
+    # first 30 minutes; stop at the low of those 30 minutes; sell 60 minutes later. Off until tested.
+    "gap_trading": {
+        "enabled": False,
+        "min_gap": 0.02,
+        "min_price": 5.0,
+        "min_dollar_volume": 20_000_000,  # liquid stocks only (avg $ traded per day)
+        "hold_minutes": 60,
+        "max_stop_pct": 0.04,             # stop at the 30-minute low, but never more than 4% away
+        "risk_per_trade_pct": 0.005,
+        "max_position_pct": 0.10,
+        "max_positions": 5,
+        "allow_short": False,             # shorting confirmed gap-downs: inconsistent in testing
+        "use_ai_review": True,            # the AI reads today's news and can veto (e.g. buyout, offering)
+        "decision_time": "10:06",
+    },
     # Swing trading: hold for days/weeks. Entries at the next open after a signal, a stop-loss
     # at 4 x the daily ATR, and an exit after `hold_days` trading days.
     # Defaults come from testing 2019-2026 SEC insider data: purchases of $1M+ by officers/directors
@@ -169,6 +185,8 @@ DEFAULTS: dict = {
         "cost_bps": 10,               # assumed round-trip trading cost (0.10%)
         "swing_min_paper_trades": 20, # swing trades are slower: judged on closed paper swing trades
         "swing_lookback_days": 180,
+        "gap_min_paper_trades": 30,   # confirmed-gap day trades: judged on closed paper gap trades
+        "gap_lookback_days": 120,
     },
     "learning": {
         "enabled": True,

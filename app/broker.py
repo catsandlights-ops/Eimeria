@@ -112,6 +112,16 @@ class AlpacaBroker:
         except Exception:
             return False
 
+    def tradable_symbols(self) -> list[str]:
+        """Every active, tradable US stock/ETF on the main exchanges (plain tickers only)."""
+        import re
+        from alpaca.trading.enums import AssetClass, AssetStatus
+        from alpaca.trading.requests import GetAssetsRequest
+        assets = self.trading.get_all_assets(GetAssetsRequest(status=AssetStatus.ACTIVE, asset_class=AssetClass.US_EQUITY))
+        ok = {"NYSE", "NASDAQ", "ARCA", "NYSEARCA", "AMEX", "BATS"}
+        return sorted(a.symbol for a in assets if a.tradable and str(getattr(a.exchange, "value", a.exchange)) in ok
+                      and re.fullmatch(r"[A-Z]{1,5}", a.symbol or ""))
+
     # ---------- market data ----------
     def _feed(self, feed: str | None):
         from alpaca.data.enums import DataFeed

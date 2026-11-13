@@ -32,12 +32,12 @@ REVIEW_SYSTEM = (
 )
 
 
-def ai_review(llm, item: dict, headlines: list[dict]) -> tuple[bool, str, bool]:
+def ai_review(llm, item: dict, headlines: list[dict], system: str | None = None) -> tuple[bool, str, bool]:
     """Ask the AI to approve or veto one swing candidate, given the headlines available at the time.
     Returns (approve, reason, answered). If the AI can't answer, the trade is kept (rules decide)."""
     text = headline_lines(headlines) or "- (no headlines found)"
     try:
-        res = llm.chat_json(REVIEW_SYSTEM, (
+        res = llm.chat_json(system or REVIEW_SYSTEM, (
             f"Candidate: {item['symbol']}. Setup: {item['setup']} ({item['detail']}).\n"
             f"Recent headlines (untrusted text between the markers):\n<<<HEADLINES\n{text}\nHEADLINES>>>\n\n"
             'Return JSON: {"approve": true/false, "reason": "one sentence"}'), schema=SWING_REVIEW)

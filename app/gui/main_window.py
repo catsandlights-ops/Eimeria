@@ -425,9 +425,17 @@ class MainWindow(QMainWindow):
         g = QGroupBox("Strategies")
         f = QFormLayout(g)
         sw = s["swing"]
-        self.f_day_on = QCheckBox("Day trading: 5-minute scans, every trade closed before 4 PM")
+        self.f_day_on = QCheckBox("Chart-pattern day trading: 5-minute scans (LOST money in testing)")
         self.f_day_on.setChecked(s["day_trading"]["enabled"])
         self.f_day_on.setToolTip("Backtests on real data found the day-trading signals did NOT beat costs.")
+        gp = s["gap_trading"]
+        self.f_gap_on = QCheckBox("Confirmed-gap day trading: buy stocks that gap up 2%+ on overnight news AND keep "
+                                  "rising for 30 minutes; sell after 60 minutes")
+        self.f_gap_on.setChecked(gp["enabled"])
+        self.f_gap_on.setToolTip("Test it first: Backtest tab > 'Day trading: confirmed gaps'. Real money stays "
+                                 "locked until 30 paper gap trades close with a profit factor of 1.2+.")
+        self.f_gap_short = QCheckBox("   ...also short confirmed gap-downs (inconsistent in testing)")
+        self.f_gap_short.setChecked(gp["allow_short"])
         self.f_swing_on = QCheckBox("Swing trading: hold for days to weeks (see the Swing tab)")
         self.f_swing_on.setChecked(sw["enabled"])
         self.f_sw_insider = QCheckBox("Setup: insider buying")
@@ -460,6 +468,8 @@ class MainWindow(QMainWindow):
         self.f_sw_hold = QSpinBox(minimum=2, maximum=120, value=sw["hold_days"], suffix=" trading days")
         self.f_sw_max = QSpinBox(minimum=1, maximum=30, value=sw["max_positions"])
         f.addRow("", self.f_day_on)
+        f.addRow("", self.f_gap_on)
+        f.addRow("", self.f_gap_short)
         f.addRow("", self.f_swing_on)
         f.addRow("", self.f_sw_insider)
         f.addRow("", self.f_sw_gap)
@@ -662,6 +672,8 @@ class MainWindow(QMainWindow):
         s["edge_gate"]["enabled"] = self.f_gate.isChecked()
         s["data"]["live_feed"] = self.f_feed.currentText()
         s["day_trading"]["enabled"] = self.f_day_on.isChecked()
+        s["gap_trading"]["enabled"] = self.f_gap_on.isChecked()
+        s["gap_trading"]["allow_short"] = self.f_gap_short.isChecked()
         sw = s["swing"]
         sw["enabled"] = self.f_swing_on.isChecked()
         sw["setups"]["insider_buy"] = self.f_sw_insider.isChecked()

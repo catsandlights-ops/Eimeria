@@ -415,14 +415,15 @@ class SimLLM:
 
 
 # ----------------------------------------------------------------------------- driver + invariants
-def run(days=20, faults=0.05, seed=1, verbose=False, kill_on_day=None) -> dict:
+def run(days=20, faults=0.05, seed=1, verbose=False, kill_on_day=None, gap=True) -> dict:
     import app.engine as engine_mod
     import app.journal as journal_mod
     import app.learner as learner_mod
     import app.swing_live as swing_mod
+    import app.gap_live as gap_mod
     rng = random.Random(seed)
     np.random.seed(seed)
-    for mod in (engine_mod, journal_mod, learner_mod, swing_mod):
+    for mod in (engine_mod, journal_mod, learner_mod, swing_mod, gap_mod):
         mod.datetime = SimDatetime
     engine_mod.time = SimTime
     import app.news as news_mod
@@ -435,12 +436,12 @@ def run(days=20, faults=0.05, seed=1, verbose=False, kill_on_day=None) -> dict:
     real_sleep = real_time.sleep
     real_time.sleep = lambda s: None
     try:
-        return _run(days, faults, rng, verbose, kill_on_day, engine_mod)
+        return _run(days, faults, rng, verbose, kill_on_day, engine_mod, gap)
     finally:
         real_time.sleep = real_sleep
 
 
-def _run(days, faults, rng, verbose, kill_on_day, engine_mod):
+def _run(days, faults, rng, verbose, kill_on_day, engine_mod, gap=True):
     from app.journal import Journal
     start = date(2026, 3, 2)
     SIM["now"] = datetime(2026, 3, 2, 7, 0, tzinfo=NY)
@@ -456,6 +457,8 @@ def _run(days, faults, rng, verbose, kill_on_day, engine_mod):
     s["swing"].update(enabled=True, use_ai_review=True, idle_cash_in_index=True, crash_protection="step_aside",
                       require_uptrend=False, hold_days=5)
     s["swing"]["insider"]["min_value"] = 1_000_000
+    # confirmed-gap day trading, with loose filters so simulated (small) gaps qualify
+    s["gap_trading"].update(enabled=gap, min_gap=0.003, min_dollar_volume=0, min_price=1, allow_short=True)
     s["alerts"]["desktop"] = False
     s["smart_money"]["enabled"] = False
     db = Path(tempfile.mkdtemp()) / "stress.db"
@@ -477,6 +480,8 @@ def _run(days, faults, rng, verbose, kill_on_day, engine_mod):
 
     def violate(msg):
         violations.append(f"{SIM['now']:%Y-%m-%d %H:%M} {msg}")
+        if verbose:
+            print("VIOLATION:", violations[-1], flush=True)
 
     tracemalloc.start()
     mem0 = None
@@ -518,19 +523,22 @@ def _run(days, faults, rng, verbose, kill_on_day, engine_mod):
                 orders_at_kill = len([o for o in broker.orders.values() if o["kind"] == "entry" or (o["kind"] == "notional" and o["side"] == "buy")])
             # ---------------- invariants
             opens = journal.open_trades()
-            day_syms = {t["symbol"] for t in opens if t["style"] == "day"}
+            day_syms = {t["symbol"] for t in opens if t["style"] == "day" and t["setup"] != "gap_confirmed"}
+            gap_syms = {t["symbol"] for t in opens if t["setup"] == "gap_confirmed"}
             swing_syms = {t["symbol"] for t in opens if t["style"] == "swing"}
             held = {p: v for p, v in broker.pos.items() if p not in ("SPY", "SH")}
             max_day_positions = max(max_day_positions, len([x for x in held if x in day_syms]))
             max_swing_positions = max(max_swing_positions, len([x for x in held if x in swing_syms]))
             if len([x for x in held if x in day_syms]) > s["risk"]["max_open_positions"]:
                 violate(f"too many day positions: {len(day_syms)}")
+            if len([x for x in held if x in gap_syms]) > s["gap_trading"]["max_positions"]:
+                violate(f"too many gap positions: {len(gap_syms)}")
             if len([x for x in held if x in swing_syms]) > s["swing"]["max_positions"]:
                 violate(f"too many swing positions: {len(swing_syms)}")
             eq = broker.equity()
             for sym, p in held.items():
                 val = abs(p["qty"]) * p["avg"]
-                limit = max(s["risk"]["max_position_pct"], s["swing"]["max_position_pct"]) * max(eq, 1)
+                limit = max(s["risk"]["max_position_pct"], s["swing"]["max_position_pct"], s["gap_trading"]["max_position_pct"]) * max(eq, 1)
                 if val > limit * 1.25:
                     violate(f"{sym} position ${val:,.0f} exceeds size limit ${limit:,.0f}")
                 has_stop = any(o["symbol"] == sym and o["kind"] == "stop" and o["status"] in ("new", "held")
@@ -560,7 +568,7 @@ def _run(days, faults, rng, verbose, kill_on_day, engine_mod):
             if overnight and killed_at is None:
                 violate(f"day trades held overnight: {overnight}")
             entries_today = len(journal.closed_trades(10 ** 6)) + len(journal.open_trades()) - trades_today_start
-            if entries_today > s["risk"]["max_trades_per_day"] + s["swing"]["max_positions"]:
+            if entries_today > s["risk"]["max_trades_per_day"] + s["swing"]["max_positions"] + s["gap_trading"]["max_positions"]:
                 violate(f"too many new trades in one day: {entries_today}")
             if mem0 is None:
                 mem0 = tracemalloc.get_traced_memory()[0]
@@ -576,6 +584,7 @@ def _run(days, faults, rng, verbose, kill_on_day, engine_mod):
         violate(f"{len(bad_closed)} closed trades without a valid exit/P&L")
     return {"violations": violations, "errors": errors, "swing_log": swing_log, "trades": len(closed),
             "swing_trades": len([t for t in closed if t["style"] == "swing"]),
+            "gap_trades": len([t for t in closed if t["setup"] == "gap_confirmed"]),
             "open": len(journal.open_trades()), "equity": broker.equity(), "broker_calls": broker.calls,
             "faults": broker.faults, "seconds": real_time.time() - t0, "max_day_positions": max_day_positions,
             "max_swing_positions": max_swing_positions, "memory_growth_mb": (mem1 - (mem0 or mem1)) / 1e6,
@@ -588,8 +597,9 @@ def main():
     ap.add_argument("--faults", type=float, default=0.05)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--kill-on-day", type=int, default=None)
+    ap.add_argument("--no-gap", action="store_true", help="leave confirmed-gap day trading off")
     a = ap.parse_args()
-    r = run(a.days, a.faults, a.seed, verbose=True, kill_on_day=a.kill_on_day)
+    r = run(a.days, a.faults, a.seed, verbose=True, kill_on_day=a.kill_on_day, gap=not a.no_gap)
     print({k: v for k, v in r.items() if k not in ("violations", "errors", "swing_log")})
     if a.days <= 5:
         print("swing log:", *r["swing_log"][:25], sep="\n  ")

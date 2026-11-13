@@ -70,13 +70,13 @@ class BacktestTab(QWidget):
         self.slip = QDoubleSpinBox(minimum=0, maximum=1, decimals=3, singleStep=0.01, suffix=" %",
                                    value=s["backtest"]["slippage_pct"] * 100)
         self.strategy = QComboBox()
-        self.strategy.addItems(["Swing trading (daily bars, hold days-weeks)", "Day trading (5-minute bars)"])
+        self.strategy.addItems(["Swing trading (daily bars, hold days-weeks)", "Day trading (5-minute bars)",
+                                "Day trading: confirmed gaps (overnight news, 5-minute bars)"])
         self.universe = QComboBox()
         self.universe.addItems(["My stock list", "My list + every stock insiders bought (slower)"])
         self.universe.setToolTip("Insider buying happens mostly in smaller companies. Testing only your list "
                                  "misses most insider trades.")
-        self.strategy.currentIndexChanged.connect(
-            lambda i: (self.universe.setEnabled(i == 0), self.score.setEnabled(i == 1)))
+        self.strategy.currentIndexChanged.connect(self._strategy_changed)
         self.score.setEnabled(False)
         f1.addRow("Strategy", self.strategy)
         f1.addRow("Stocks", self.symbols)
@@ -150,6 +150,12 @@ class BacktestTab(QWidget):
         lay.addWidget(split, 1)
 
     # ------------------------------------------------------------------
+    def _strategy_changed(self, i: int):
+        self.universe.setEnabled(i in (0, 2))
+        self.score.setEnabled(i == 1)
+        self.universe.setItemText(1, "My list + every stock insiders bought (slower)" if i == 0 else
+                                  "My list + all liquid US stocks (slower)")
+
     def run(self):
         eng = self.win.engine
         if not eng:
@@ -162,7 +168,8 @@ class BacktestTab(QWidget):
             QMessageBox.warning(self, "Check inputs", "Enter some stocks and a valid date range.")
             return
         swing = self.strategy.currentIndex() == 0
-        max_days = 365 * 8 if swing else 750
+        gap = self.strategy.currentIndex() == 2
+        max_days = 365 * 8 if swing else 365 * 5 if gap else 750
         if (end - start).days > max_days or len(syms) > 80:
             QMessageBox.warning(self, "Too big", f"Please test at most {max_days // 365} years and 80 stocks "
                                                  "in your list at a time.")
@@ -175,13 +182,29 @@ class BacktestTab(QWidget):
         self.apply_btn.setEnabled(False)
         self.status.setText("Starting...")
         self._rec_run, self.recommended = self.recommended and swing, False
-        if swing:
+        if gap:
+            threading.Thread(target=self._work_gap, args=(eng.broker, settings, syms, start, end,
+                                                          self.universe.currentIndex() == 1), daemon=True).start()
+        elif swing:
             all_insiders = self.universe.currentIndex() == 1
             threading.Thread(target=self._work_swing, args=(eng.broker, settings, syms, start, end, all_insiders),
                              daemon=True).start()
         else:
             threading.Thread(target=self._work, args=(eng.broker, settings, weights, syms, start, end),
                              daemon=True).start()
+
+    def _work_gap(self, broker, settings, syms, start: date, end: date, all_stocks: bool):
+        from ..gap import GapBacktester
+        from ..gap_data import load_gap_backtest
+        try:
+            events, intraday, spy, notes = load_gap_backtest(broker, settings, syms, start, end, all_stocks,
+                                                             self.bridge.progress.emit)
+            self.bridge.progress.emit(f"Simulating {len(events)} gaps...")
+            res = GapBacktester(settings).run(events, intraday, spy, start, end)
+            res.notes = notes + res.notes
+            self.bridge.done.emit(res, None)
+        except Exception as e:
+            self.bridge.done.emit(None, f"{e}\n" + traceback.format_exc(limit=2))
 
     def _work_swing(self, broker, settings, syms, start: date, end: date, all_insiders: bool):
         from ..swing_data import load_swing_signals
@@ -220,7 +243,7 @@ class BacktestTab(QWidget):
         self.result = res
         self.copy_btn.setEnabled(True)
         s = res.stats
-        if res.trades and "setup" in res.trades[0]:          # a swing backtest: remember its per-trade results
+        if res.trades and res.trades[0].get("setup") in ("insider_buy", "news_gap"):   # swing: remember results
             from ..health import expectation_from_backtest
             exp = expectation_from_backtest(res, self.start.date().toPython(), self.end.date().toPython())
             if exp:
@@ -233,6 +256,10 @@ class BacktestTab(QWidget):
                 "halves": " / ".join(f"PF {h['profit_factor']:.2f}" for h in res.halves)})
             self.win.getting_started.refresh()
         self.result_tabs.setCurrentIndex(0 if res.edge_table else 1)   # swing results have no edge table
+        gap_result = bool(res.trades) and res.trades[0].get("setup") == "gap_confirmed" or \
+            any("gap up" in r.get("band", "") or "gap down" in r.get("band", "") for r in res.edge_table)
+        self.edge_table.horizontalHeaderItem(0).setText("What happened in the first 30 min" if gap_result
+                                                        else "Signal strength")
         self.status.setText("Done.")
         if res.notes:
             self.status.setToolTip("\n".join(res.notes))

@@ -155,6 +155,27 @@ Full-market historical data (all exchanges) is free on Alpaca for anything older
 
 ---
 
+## Day trading: confirmed gaps (off by default)
+
+Day trading on chart patterns lost money in testing (see *Research results*). This day-trading strategy instead trades **overnight news, but only once the market has confirmed it**:
+
+1. **9:30 AM:** a stock opens at least **2% above** yesterday's close (overnight news: earnings, an upgrade, a contract). It must cost $5 or more and trade at least $20M a day.
+2. **Wait 30 minutes.** At 10:05 AM, if the stock is still above where it was after the first 5 minutes, the move is **confirmed**. If it fell back, it's skipped, because reversals did badly in testing.
+3. **The AI reads the news** and can veto it. For example, it rejects a jump caused by a buyout offer at a fixed price, a share sale or a meme spike.
+4. **Buy at about 10:06 AM.** The stop-loss is the lowest price of the first 30 minutes (never more than 4% below the entry), and each trade risks at most 0.5% of the account.
+5. **Sell 60 minutes later**, or earlier if the stop-loss is hit. Positions are never held overnight.
+
+**Research** (5-minute prices, 46 large stocks, 60 trading days, trading costs included): confirmed gap-ups made **+0.55% per trade in the first half and +0.33% in the second half** (profit factor 2.0, 81 trades). Gap-ups that reversed in the first 30 minutes, and short trades on gap-downs, made money in one half and lost it in the other. That's why shorting is a separate option, off by default.
+
+**Treat this as promising, not proven.** 60 days is a short test. Before turning it on:
+1. In the **Backtest** tab, choose *Day trading: confirmed gaps* and *My list + all liquid US stocks*, and test at least 1–2 years. This downloads 5-minute prices for gap days only, so it takes a while.
+2. In the results table, *gap up, kept going (confirmed)* should be positive in **both halves**. If it isn't, leave it off.
+3. Turn it on in **Settings → Strategies**, in paper mode. Real money stays locked until there are **30 closed paper gap trades** in the last 120 days with a profit factor of at least 1.2.
+
+**Small accounts:** each gap trade is a day trade. US rules allow only 3 day trades in 5 days on margin accounts under $25,000.
+
+---
+
 ## Swing trading
 
 **How it works:**
@@ -182,7 +203,7 @@ Full-market historical data (all exchanges) is free on Alpaca for anything older
 
 All tests used real data, with trading costs, buying at the next day's open after the information became public.
 
-**Day trading** (5-minute prices, 46 large stocks, Aug–Nov 2026): the chart signals lost money after costs (profit factor 0.79, -5.2%), and their direction flipped between the two halves. Opening-range breakouts and an adaptive momentum/reversal switch didn't work either.
+**Day trading** (5-minute prices, 46 large stocks, Aug–Nov 2026): the chart signals lost money after costs (profit factor 0.79, -5.2%), and their direction flipped between the two halves. Opening-range breakouts and an adaptive momentum/reversal switch didn't work either. **Confirmed gap-ups** (overnight news that kept going for 30 minutes) were the exception: +0.55% and +0.33% per trade after costs in the two halves (see *Day trading: confirmed gaps*).
 
 **Swing trading** (every insider purchase filed with the SEC 2019 – Q1 2026, about 112,000 filings, plus 7 years of daily prices for about 2,800 stocks):
 
