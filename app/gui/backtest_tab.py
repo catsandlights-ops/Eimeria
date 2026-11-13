@@ -9,7 +9,7 @@ from PySide6.QtCharts import QChart, QChartView, QDateTimeAxis, QLineSeries, QVa
 from PySide6.QtCore import QDate, QDateTime, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QComboBox, QDateEdit, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QApplication, QFrame, QPlainTextEdit, QScrollArea, QComboBox, QDateEdit, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
     QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -37,7 +37,16 @@ class BacktestTab(QWidget):
         from .main_window import MUTED, StatCard, make_table  # avoid circular import at load time
         self._make_table = make_table
         s = window.ctx.settings
-        lay = QVBoxLayout(self)
+        # Everything scrolls, so the chart and results never get squashed on smaller screens
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        inner = QWidget()
+        scroll.setWidget(inner)
+        outer.addWidget(scroll)
+        lay = QVBoxLayout(inner)
         info = QLabel(
             "Replays past market data through the bot's rules, including trading costs. Swing: insider "
             "purchases from the SEC's records (2006 onward; needs your SEC contact in Settings) on daily prices. "
@@ -90,7 +99,12 @@ class BacktestTab(QWidget):
         self.apply_btn.setToolTip("Sets the bot's signal weights to the ones suggested by this backtest")
         self.apply_btn.clicked.connect(self.apply_weights)
         self.status = QLabel("")
+        self.copy_btn = QPushButton("Copy results")
+        self.copy_btn.setToolTip("Copies the numbers and the summary as text, e.g. to paste into a chat")
+        self.copy_btn.setEnabled(False)
+        self.copy_btn.clicked.connect(self.copy_results)
         row.addWidget(self.run_btn)
+        row.addWidget(self.copy_btn)
         row.addWidget(self.apply_btn)
         row.addWidget(self.status, 1)
         lay.addLayout(row)
@@ -101,9 +115,11 @@ class BacktestTab(QWidget):
         for c in (self.c_ret, self.c_pf, self.c_win, self.c_dd, self.c_trades, self.c_bench):
             cards.addWidget(c)
         lay.addLayout(cards)
-        self.verdict = QLabel("")
-        self.verdict.setWordWrap(True)
-        self.verdict.setStyleSheet("font-size: 11pt; padding: 4px;")
+        self.verdict = QPlainTextEdit()               # scrolls instead of pushing the chart off the screen
+        self.verdict.setReadOnly(True)
+        self.verdict.setMinimumHeight(70)
+        self.verdict.setMaximumHeight(130)
+        self.verdict.setStyleSheet("font-size: 10.5pt;")
         lay.addWidget(self.verdict)
 
         split = QSplitter(Qt.Horizontal)
@@ -130,6 +146,7 @@ class BacktestTab(QWidget):
         tabs.addTab(self.sig_table, "Signal quality")
         split.addWidget(tabs)
         split.setSizes([600, 600])
+        split.setMinimumHeight(340)
         lay.addWidget(split, 1)
 
     # ------------------------------------------------------------------
@@ -201,6 +218,7 @@ class BacktestTab(QWidget):
             QMessageBox.warning(self, "Backtest failed", err)
             return
         self.result = res
+        self.copy_btn.setEnabled(True)
         s = res.stats
         if res.trades and "setup" in res.trades[0]:          # a swing backtest: remember its per-trade results
             from ..health import expectation_from_backtest
@@ -219,7 +237,7 @@ class BacktestTab(QWidget):
         if res.notes:
             self.status.setToolTip("\n".join(res.notes))
         if not s:
-            self.verdict.setText(verdict(res))
+            self.verdict.setPlainText(verdict(res))
             return
         pf = s["profit_factor"]
         self.c_ret.set(f"{s['total_return']:+.1%}", pnl_color(s["total_return"]))
@@ -234,7 +252,7 @@ class BacktestTab(QWidget):
             f"{h['name'].capitalize()} (from {h['from']}): {h['trades']} trades, P&L {money(h['pnl'])}, "
             f"profit factor {'∞' if h['profit_factor'] == float('inf') else format(h['profit_factor'], '.2f')}"
             for h in res.halves)
-        self.verdict.setText(verdict(res) + (f"\n{halves}" if halves else "") +
+        self.verdict.setPlainText(verdict(res) + (f"\n{halves}" if halves else "") +
                              (f"\nHow trades ended: {reasons}" if reasons else "") +
                              ("\n" + " ".join(res.notes) if res.notes else ""))
         rows, colors = [], []
@@ -256,7 +274,8 @@ class BacktestTab(QWidget):
                                     .replace(tzinfo=None)).toMSecsSinceEpoch(), eq)
         self.chart.addSeries(series)
         xa, ya = QDateTimeAxis(), QValueAxis()
-        xa.setFormat("MMM d")
+        xa.setFormat("MMM yyyy")
+        xa.setTickCount(5)
         ya.setLabelFormat("$%.0f")
         self.chart.addAxis(xa, Qt.AlignBottom)
         self.chart.addAxis(ya, Qt.AlignLeft)
@@ -280,6 +299,16 @@ class BacktestTab(QWidget):
         fill_table(self.sig_table, rows, [[None, pnl_color(res.signal_quality.get(k, 0)), None,
                                            MUTED] for k in TECH_SIGNALS])
         self.apply_btn.setEnabled(bool(res.suggested_weights))
+
+    def copy_results(self):
+        cards = [("Total return", self.c_ret), ("Profit factor", self.c_pf), ("Win rate", self.c_win),
+                 ("Worst drop", self.c_dd), ("Trades", self.c_trades), ("S&P 500 same period", self.c_bench)]
+        text = (f"Eimeria backtest: {self.strategy.currentText()}, {self.start.date().toString('yyyy-MM-dd')} to "
+                f"{self.end.date().toString('yyyy-MM-dd')}, {self.universe.currentText()}\n" +
+                "\n".join(f"{name}: {card.value.text()}" for name, card in cards) +
+                "\n\n" + self.verdict.toPlainText())
+        QApplication.clipboard().setText(text)
+        self.status.setText("Results copied: paste them anywhere with Ctrl+V.")
 
     def apply_weights(self):
         if not self.result or not self.win.engine:

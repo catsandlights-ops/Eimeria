@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6 (2026-11-13)
+- Backtest tab: new 'Copy results' button to paste the results anywhere
+- Backtest tab: the account-value chart is no longer squashed (the tab scrolls, the chart keeps its height, dates are readable)
+- Selected table rows are highlighted in blue instead of red; the log panel starts smaller
+
 ## 0.2.5 (2026-11-13)
 - Fix: after an update, Windows showed an error instead of the 'Updated from X to Y' message (and repeated it on every start)
 

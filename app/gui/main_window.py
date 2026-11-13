@@ -31,6 +31,7 @@ QPushButton#stop { background: #9e6a03; border-color: #bb8009; font-weight: bold
 QPushButton#kill { background: #b62324; border-color: #da3633; font-weight: bold; }
 QTableWidget { gridline-color: #21262d; background: #0d1117; alternate-background-color: #111821;
                border: 1px solid #30363d; border-radius: 6px; }
+QTableWidget::item:selected { background: #1f3a5f; color: #e6edf3; }
 QHeaderView::section { background: #161b22; padding: 6px; border: none; border-bottom: 1px solid #30363d;
                        color: #8b949e; font-weight: bold; }
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit, QListWidget {
@@ -148,7 +149,9 @@ class MainWindow(QMainWindow):
         self.log_box.setMaximumBlockCount(2000)
         self.log_box.setFont(QFont("Consolas", 9))
         splitter.addWidget(self.log_box)
-        splitter.setSizes([640, 170])
+        splitter.setSizes([760, 90])               # the log starts small; drag the divider to enlarge it
+        splitter.setStretchFactor(0, 1)            # extra window height goes to the tabs, not the log
+        splitter.setStretchFactor(1, 0)
         root.addWidget(splitter)
         self.setCentralWidget(central)
 
