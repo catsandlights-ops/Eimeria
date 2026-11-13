@@ -1,8 +1,8 @@
 {
-  "version": "0.4.2",
-  "commit": "373939d67118bbe1e08ab28523d5d66342a64ed9",
+  "version": "0.4.3",
+  "commit": "e48bc5120c202399c5cd4e564694e8810f4d8375",
   "date": "2026-11-13",
   "notes": [
-    "AI trader test, version 2: the evening before, the AI reviews each company and writes a plan (what's expected, what good or bad news would look like). At 9:20 AM it compares the new headlines and the pre-market move with its plan and scores each company. Each day it buys the 2 best and shorts the 2 worst. It's tested on days version 1 didn't use."
+    "AI trader test, version 3: the AI reacts to news published DURING market hours. It uses its plan from the evening before, and the entry is delayed realistically (the AI's real answer time plus a minute). The results show how much being slower than professional traders costs."
   ]
 }
