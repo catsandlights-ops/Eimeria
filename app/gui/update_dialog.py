@@ -168,7 +168,14 @@ def show_last_update_result(parent):
         r = json.loads(f.read_text(encoding="utf-8"))
     except Exception:
         r = {"ok": False, "error": "unreadable result"}
-    f.rename(f.with_name("last_update_shown.json"))
+    try:
+        # replace() overwrites an older copy (rename() fails on Windows if the target already exists)
+        f.replace(f.with_name("last_update_shown.json"))
+    except OSError:
+        try:
+            f.unlink()
+        except OSError:
+            return                   # can't mark it as shown: better to stay quiet than repeat it forever
     if r.get("ok"):
         QMessageBox.information(parent, "Eimeria updated", f"Updated from {r.get('from')} to {r.get('to')}.")
     else:

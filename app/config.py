@@ -238,7 +238,7 @@ def load_settings() -> dict:
             # A damaged settings file must not stop the app: keep it aside and start from defaults
             from datetime import datetime
             broken = SETTINGS_PATH.with_name(f"settings.broken-{datetime.now():%Y%m%d-%H%M%S}.yaml")
-            SETTINGS_PATH.rename(broken)
+            SETTINGS_PATH.replace(broken)
             SETTINGS_PROBLEM.append(f"settings.yaml couldn't be read ({e}). It was renamed to {broken.name} and "
                                     f"default settings are being used. Your keys (.env) and trades are unaffected.")
             user = {}

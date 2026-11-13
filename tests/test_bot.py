@@ -1292,3 +1292,20 @@ def test_self_test_quotes_when_market_closed(settings, journal, monkeypatch, tmp
     eng = engine(settings, journal, broker)
     checks = {c.name: c for c in selftest.run_self_test(eng, settings, order_test=False)}
     assert checks["Live quotes"].status == "skipped" and "market is closed" in checks["Live quotes"].detail
+
+
+def test_update_result_shown_once_even_with_old_copy(tmp_path, monkeypatch):
+    import os
+    from PySide6.QtWidgets import QApplication, QMessageBox
+    from app import config
+    from app.gui import update_dialog
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    QApplication.instance() or QApplication([])
+    monkeypatch.setattr(config, "LOG_DIR", tmp_path)
+    shown = []
+    monkeypatch.setattr(QMessageBox, "information", staticmethod(lambda *a, **k: shown.append(a[2])))
+    (tmp_path / "last_update_shown.json").write_text('{"ok": true, "from": "0.2.2", "to": "0.2.3"}')   # older one
+    (tmp_path / "last_update.json").write_text('{"ok": true, "from": "0.2.3", "to": "0.2.4"}')
+    update_dialog.show_last_update_result(None)
+    update_dialog.show_last_update_result(None)                     # next start: nothing again
+    assert shown == ["Updated from 0.2.3 to 0.2.4."] and not (tmp_path / "last_update.json").exists()

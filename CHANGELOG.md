@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.5 (2026-11-13)
+- Fix: after an update, Windows showed an error instead of the 'Updated from X to Y' message (and repeated it on every start)
+
 ## 0.2.4 (2026-11-13)
 - Self-test: missing live quotes outside market hours are reported as normal instead of as a warning
 
