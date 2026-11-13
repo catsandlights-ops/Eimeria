@@ -1816,3 +1816,72 @@ def test_premarket_move():
     c = Case("XYZ", day, ["h"], extra={"prev_close": 100.0})
     moves = premarket_moves(B(), copy.deepcopy(DEFAULTS), day, [c])
     assert moves["XYZ"] == pytest.approx(127 / 100 - 1)            # last bar starting before 9:20
+
+
+def test_ai_trader_test_v3_news_reaction():
+    import random as _r
+    import numpy as np
+    import pandas as pd
+    from app.ai_news_test import V3_SAFETY_S, run_ai_trader_test_v3
+    s = copy.deepcopy(DEFAULTS)
+    names = ["S" + "".join(chr(65 + int(c)) for c in f"{k:03d}") for k in range(25)]
+    data = synth_market(25, seed=14, start=date(2024, 6, 3))
+    data["SPY"] = synth_market(1, seed=15, start=date(2024, 6, 3))["SAAA"]
+    rng = _r.Random(4)
+    news, effect = {}, {}
+    for sym in names:
+        for ts in data[sym].index[1:]:
+            day = ts.tz_convert(NY).date()
+            if rng.random() < 0.7:
+                continue
+            good = rng.random() < 0.5
+            t = datetime.combine(day, datetime.min.time(), NY).replace(hour=11, minute=rng.randrange(0, 50))
+            effect[(sym, day)] = (t, 1 if good else -1)
+            news.setdefault(day, []).append({"headline": f"{sym} {'wins big contract' if good else 'loses lawsuit'}",
+                                             "summary": "", "symbols": [sym], "time": t})
+            news[day].append({"headline": f"{sym} LATER UPDATE", "summary": "", "symbols": [sym],
+                              "time": t + timedelta(minutes=20)})
+
+    def minute_bars(sym, day):
+        r = np.random.default_rng(abs(hash((sym, day))) % 2**32)
+        idx = pd.date_range(pd.Timestamp(day).tz_localize(NY) + pd.Timedelta(hours=9, minutes=30), periods=390,
+                            freq="1min")
+        ret = r.normal(0, 0.0005, 390)
+        if (sym, day) in effect:
+            t, d = effect[(sym, day)]
+            k = int((pd.Timestamp(t) - idx[0]).total_seconds() // 60)
+            ret[k] += d * 0.01                                   # instant jump (the speed cost)
+            ret[k + 1:k + 61] += d * 0.02 / 60                     # then a slow drift for an hour
+        close = 50 * np.exp(np.cumsum(ret))
+        open_ = np.r_[50, close[:-1]]
+        return pd.DataFrame({"open": open_, "high": np.maximum(open_, close), "low": np.minimum(open_, close),
+                             "close": close, "volume": 1e4}, index=idx.tz_convert("UTC"))
+    seen = []
+
+    class B(SynthBroker):
+        def news_window(self, start, end, max_items=200):
+            return [n for n in news.get(start.date(), []) if start <= n["time"] <= end]
+
+        def news_between(self, symbols, start, end, limit=30):
+            return []
+
+        def bars_range(self, syms, start, end, minutes=5, feed=None):
+            assert minutes == 1
+            return {sm: minute_bars(sm, start) for sm in syms}
+
+    class SmartLLM:
+        def chat_json(self, system, user, schema=None):
+            if "situation" in schema["properties"]:
+                return {"situation": "-", "good_news_would_be": "-", "bad_news_would_be": "-",
+                        "already_expected": "-"}
+            seen.append(user)
+            assert "LATER UPDATE" not in user                      # nothing published after the decision
+            return {"action": "buy" if "wins" in user else "short", "confidence": 0.9, "reasoning": "news"}
+    res = run_ai_trader_test_v3(B(data), s, SmartLLM(), date(2025, 1, 1), date(2026, 9, 30), 400)
+    assert "AI news reaction (v3): PASS" in res.headline, res.headline
+    real, instant, already = res.edge_table[0], res.edge_table[3], res.edge_table[4]
+    assert instant["bps1"] > real["bps1"] > 0 and already["bps1"] > 0             # being late costs money
+    traded = [c for c in res.ai_cases if "real" in c.extra]
+    assert all(c.extra["real"]["entry_time"] >= c.extra["news_time"] + timedelta(seconds=V3_SAFETY_S)
+               for c in traded)
+    assert {t["side"] for t in res.trades} == {"long", "short"} and res.version == 3

@@ -128,7 +128,8 @@ class AITab(QWidget):
         self.t_version = QComboBox()
         self.t_version.addItems([
             "Version 1: headlines only, buy / short / skip",
-            "Version 2: plans the evening before, then ranks companies each morning (2 answers each, slower)"])
+            "Version 2: plans the evening before, then ranks companies each morning (2 answers each, slower)",
+            "Version 3: reacts to news DURING market hours, with realistic delays (1-minute prices, slower)"])
         self.t_version.setToolTip(
             "Version 2: the evening before, the AI reviews each company (price trend, last week's news) and "
             "writes what good or bad news would look like. At 9:20 AM it reads the new headlines and the "
@@ -185,11 +186,15 @@ class AITab(QWidget):
                          daemon=True).start()
 
     def _trader_work(self, broker, settings, llm, start, end, sample, version, used):
-        from ..ai_news_test import run_ai_trader_test, run_ai_trader_test_v2
+        from ..ai_news_test import run_ai_trader_test, run_ai_trader_test_v2, run_ai_trader_test_v3
         try:
             emit = self.tbridge.progress.emit
-            res = (run_ai_trader_test(broker, settings, llm, start, end, sample, emit=emit) if version == 0 else
-                   run_ai_trader_test_v2(broker, settings, llm, start, end, sample, exclude_days=used, emit=emit))
+            if version == 0:
+                res = run_ai_trader_test(broker, settings, llm, start, end, sample, emit=emit)
+            elif version == 1:
+                res = run_ai_trader_test_v2(broker, settings, llm, start, end, sample, exclude_days=used, emit=emit)
+            else:
+                res = run_ai_trader_test_v3(broker, settings, llm, start, end, sample, emit=emit)
             self.tbridge.done.emit(res, None)
         except Exception as ex:
             self.tbridge.done.emit(None, f"{ex}\n{traceback.format_exc(limit=2)}")
@@ -213,6 +218,8 @@ class AITab(QWidget):
             colors.append([None, None, pnl_color(r["bps1"]), None, pnl_color(r["bps2"]), None,
                            GREEN if r["consistent"] else MUTED])
         fill_table(self.t_table, rows, colors)
+        self.t_examples.horizontalHeaderItem(6).setText(
+            "Stock vs S&P, hour after the news" if getattr(res, "version", 1) == 3 else "Stock vs S&P that day")
         ex_rows, ex_colors = [], []
         for c in getattr(res, "ai_cases", [])[:500]:
             sc = c.extra.get("score")
