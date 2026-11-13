@@ -31,10 +31,10 @@ def monthly_t(values, days) -> float:
     return float(m.mean() / m.std(ddof=1) * math.sqrt(len(m)))
 
 
-def split_row(name: str, side: str, values, days, min_n: int, scale: float = 1e4) -> dict:
-    """An edge-table row: average (in bps) and count before 2024 and from 2024 on."""
+def split_row(name: str, side: str, values, days, min_n: int, scale: float = 1e4, split: date = HOLDOUT_START) -> dict:
+    """An edge-table row: average (in bps) and count before `split` (2024) and from it on."""
     v = np.asarray(values, float)
-    d = np.array([x < HOLDOUT_START for x in days], bool) if len(v) else np.zeros(0, bool)
+    d = np.array([x < split for x in days], bool) if len(v) else np.zeros(0, bool)
     a, b = v[d], v[~d]
     r = {"band": name, "side": side, "n1": int(len(a)), "bps1": float(a.mean() * scale) if len(a) else 0.0,
          "n2": int(len(b)), "bps2": float(b.mean() * scale) if len(b) else 0.0}
@@ -42,23 +42,25 @@ def split_row(name: str, side: str, values, days, min_n: int, scale: float = 1e4
     return r
 
 
-def verdict_line(name: str, values, days, min_n: int, unit: str = "bps", scale: float = 1e4) -> tuple[str, bool]:
+def verdict_line(name: str, values, days, min_n: int, unit: str = "bps", scale: float = 1e4,
+                 split: date = HOLDOUT_START, labels: tuple[str, str] = ("before 2024", "from 2024 on"),
+                 incomplete_hint: str = "Test 2019-01-01 to yesterday.") -> tuple[str, bool]:
     """The pre-registered PASS/FAIL sentence for one rule."""
     v = np.asarray(values, float)
     days = list(days)
-    dev = np.array([x < HOLDOUT_START for x in days], bool) if len(v) else np.zeros(0, bool)
+    dev = np.array([x < split for x in days], bool) if len(v) else np.zeros(0, bool)
     n1, n2 = int(dev.sum()), int((~dev).sum())
+    a, b = labels
     if n1 < min_n or n2 < min_n:
-        return (f"{name}: INCOMPLETE ({n1} samples before 2024, {n2} from 2024 on; needs {min_n} in each). "
-                "Test 2019-01-01 to yesterday."), False
+        return (f"{name}: INCOMPLETE ({n1} samples {a}, {n2} {b}; needs {min_n} in each). {incomplete_hint}"), False
     m1, m2, t = v[dev].mean() * scale, v[~dev].mean() * scale, monthly_t(v, days)
     if m1 > 0 and m2 > 0 and t >= MIN_T:
-        return f"{name}: PASS ({m1:+.1f} {unit} before 2024, {m2:+.1f} {unit} from 2024 on, t = {t:.1f}).", True
+        return f"{name}: PASS ({m1:+.1f} {unit} {a}, {m2:+.1f} {unit} {b}, t = {t:.1f}).", True
     why = []
     if m1 <= 0:
-        why.append(f"not positive before 2024 ({m1:+.1f} {unit})")
+        why.append(f"not positive {a} ({m1:+.1f} {unit})")
     if m2 <= 0:
-        why.append(f"not positive from 2024 on ({m2:+.1f} {unit})")
+        why.append(f"not positive {b} ({m2:+.1f} {unit})")
     if 0 <= t < MIN_T and m1 > 0 and m2 > 0:
         why.append(f"too weak to tell from luck (t = {t:.1f}, needs {MIN_T:.0f})")
     elif not why:

@@ -8,8 +8,8 @@ from datetime import date, timedelta
 
 from PySide6.QtCore import QDate, QObject, Qt, Signal
 from PySide6.QtWidgets import (
-    QDateEdit, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton, QSpinBox,
-    QSplitter, QVBoxLayout, QWidget,
+    QDateEdit, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+    QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import config
@@ -92,8 +92,115 @@ class AITab(QWidget):
         split.addWidget(self.result_table)
         split.addWidget(self.examples)
         tl.addWidget(split, 1)
-        lay.addWidget(box, 1)
+        tests = QTabWidget()
+        tests.addTab(box, "Swing veto test")
+        tests.addTab(self._trader_box(MUTED, make_table), "AI trader test (long or short on news)")
+        lay.addWidget(tests, 1)
         self.refresh()
+
+    # ------------------------------------------------------------------ AI trader test (long/short on news)
+    def _trader_box(self, muted, make_table) -> QWidget:
+        self.tbridge = _Bridge()
+        self.tbridge.progress.connect(lambda m: self.t_status.setText(m))
+        self.tbridge.done.connect(self._trader_done)
+        w = QWidget()
+        tl = QVBoxLayout(w)
+        info = QLabel(
+            "Can your AI make money by reading the news and choosing to BUY or SHORT? For random past days after "
+            "the AI's training cutoff, it reads each company's headlines from yesterday's close to 9:20 AM (only "
+            "news that existed then) and answers buy, short or skip. Buys are bought at the open and sold at the "
+            "close; shorts the opposite. Results are vs the S&P 500 over the same hours, after costs. Rules are "
+            "fixed in advance: it PASSES only if its trades make money in both halves of the period. Expect about "
+            "5-15 seconds per answer on a typical PC (300 answers: roughly 30-60 minutes).")
+        info.setWordWrap(True)
+        info.setStyleSheet(f"color: {muted};")
+        tl.addWidget(info)
+        f = QFormLayout()
+        c = default_cutoff()
+        self.t_cutoff = QDateEdit(QDate(c.year, c.month, c.day), calendarPopup=True)
+        y = date.today() - timedelta(days=7)
+        self.t_end = QDateEdit(QDate(y.year, y.month, y.day), calendarPopup=True)
+        for d in (self.t_cutoff, self.t_end):
+            d.setDisplayFormat("yyyy-MM-dd")
+        self.t_sample = QSpinBox(minimum=40, maximum=3000, value=300, singleStep=50)
+        self.t_sample.setToolTip("Company-days to ask about. More = more reliable, slower. 300+ recommended.")
+        f.addRow("AI knowledge cutoff (use news after)", self.t_cutoff)
+        f.addRow("Up to", self.t_end)
+        f.addRow("Company-days to ask the AI about", self.t_sample)
+        tl.addLayout(f)
+        row = QHBoxLayout()
+        self.t_run = QPushButton("Run AI trader test")
+        self.t_run.setObjectName("start")
+        self.t_run.clicked.connect(self.run_trader)
+        self.t_status = QLabel("")
+        self.t_status.setWordWrap(True)
+        row.addWidget(self.t_run)
+        row.addWidget(self.t_status, 1)
+        tl.addLayout(row)
+        self.t_verdict = QPlainTextEdit()
+        self.t_verdict.setReadOnly(True)
+        self.t_verdict.setMaximumHeight(110)
+        tl.addWidget(self.t_verdict)
+        split = QSplitter(Qt.Vertical)
+        self.t_table = make_table(["Rule", "Trade", "1st half: avg vs S&P after costs", "count",
+                                   "2nd half: avg vs S&P after costs", "count", "Edge?"])
+        self.t_examples = make_table(["Date", "Symbol", "AI", "Confidence", "Reason", "Headlines",
+                                      "Stock vs S&P that day"])
+        split.addWidget(self.t_table)
+        split.addWidget(self.t_examples)
+        tl.addWidget(split, 1)
+        return w
+
+    def run_trader(self):
+        e = self.win.engine
+        if not e:
+            QMessageBox.warning(self, "Not connected", "Connect Alpaca first: the test downloads prices and news.")
+            return
+        ok, msg = e.llm.status()
+        if not ok:
+            QMessageBox.warning(self, "AI not ready", msg)
+            return
+        start, end = self.t_cutoff.date().toPython(), self.t_end.date().toPython()
+        if end <= start + timedelta(days=60):
+            QMessageBox.warning(self, "Dates", "Leave at least a few months between the cutoff and the end date.")
+            return
+        self.t_run.setEnabled(False)
+        self.t_verdict.setPlainText("")
+        threading.Thread(target=self._trader_work, args=(e.broker, dict(self.win.ctx.settings), e.llm, start, end,
+                                                         self.t_sample.value()), daemon=True).start()
+
+    def _trader_work(self, broker, settings, llm, start, end, sample):
+        from ..ai_news_test import run_ai_trader_test
+        try:
+            self.tbridge.done.emit(run_ai_trader_test(broker, settings, llm, start, end, sample,
+                                                      emit=self.tbridge.progress.emit), None)
+        except Exception as ex:
+            self.tbridge.done.emit(None, f"{ex}\n{traceback.format_exc(limit=2)}")
+
+    def _trader_done(self, res, err):
+        from .main_window import GREEN, MUTED, RED, fill_table, pnl_color
+        self.t_run.setEnabled(True)
+        if err:
+            self.t_status.setText("AI trader test failed.")
+            QMessageBox.warning(self, "AI trader test", err)
+            return
+        self.t_status.setText("Done.")
+        self.t_verdict.setPlainText(res.headline + "\n" + " ".join(res.notes))
+        rows, colors = [], []
+        for r in res.edge_table:
+            rows.append([r["band"], r["side"], f"{r['bps1'] / 100:+.2f}%", r["n1"], f"{r['bps2'] / 100:+.2f}%",
+                         r["n2"], "YES" if r["consistent"] else "no"])
+            colors.append([None, None, pnl_color(r["bps1"]), None, pnl_color(r["bps2"]), None,
+                           GREEN if r["consistent"] else MUTED])
+        fill_table(self.t_table, rows, colors)
+        ex_rows, ex_colors = [], []
+        for c in getattr(res, "ai_cases", [])[:500]:
+            ex_rows.append([str(c.day), c.symbol, c.action.upper(), f"{c.confidence:.2f}", c.reason,
+                            len(c.headlines), f"{c.excess:+.2%}"])
+            col = GREEN if c.action == "buy" else RED if c.action == "short" else None
+            ex_colors.append([None, None, col, None, None, None, pnl_color(c.excess)])
+        fill_table(self.t_examples, ex_rows, ex_colors)
+        self.win.ctx.journal.set("ai_trader_test_last", {"headline": res.headline, "rows": res.edge_table})
 
     # ------------------------------------------------------------------ status
     def refresh(self):

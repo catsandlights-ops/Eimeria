@@ -234,6 +234,27 @@ class AlpacaBroker:
         return [{"headline": n.headline, "summary": n.summary or "", "symbols": list(n.symbols or []),
                  "source": n.source, "url": n.url, "time": n.created_at} for n in items]
 
+    def news_window(self, start: datetime, end: datetime, max_items: int = 200) -> list[dict]:
+        """All news (any company) published between start and end, newest first, up to max_items.
+        Pages backwards in time 50 articles at a time."""
+        from alpaca.data.requests import NewsRequest
+        out, until = [], end
+        while len(out) < max_items:
+            try:
+                res = self.news_client.get_news(NewsRequest(start=start, end=until, limit=50, sort="desc"))
+            except Exception as e:
+                log.warning("Alpaca news (window) failed: %s", e)
+                break
+            items = res.data.get("news", []) if hasattr(res, "data") else []
+            batch = [{"headline": n.headline, "summary": n.summary or "", "symbols": list(n.symbols or []),
+                      "source": n.source, "url": n.url, "time": n.created_at} for n in items]
+            out += batch
+            times = [n["time"] for n in batch if n["time"] is not None]
+            if len(batch) < 50 or not times:
+                break
+            until = min(times) - timedelta(seconds=1)
+        return out[:max_items]
+
     # ---------- orders ----------
     def quote(self, symbol: str) -> dict | None:
         """Latest bid/ask, or None if unavailable."""

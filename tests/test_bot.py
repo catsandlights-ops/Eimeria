@@ -1685,3 +1685,62 @@ def test_insider_refinements_test(monkeypatch):
         "Current default: $1M+ by insiders", "Cluster buy: 3+ insiders, $100k+ in 14 days", "CEO or CFO bought $100k+"]
     assert res.edge_table[1]["n1"] > 0 and res.edge_table[0]["n1"] == 0          # nobody bought $1M+
     assert "Cluster buy: 3+ insiders, $100k+ in 14 days:" in res.headline
+
+
+# ---------------------------------------------------------------- AI trader test (long/short on news)
+def test_ai_trader_test(monkeypatch):
+    import random as _r
+    import pandas as pd
+    from app.ai_news_test import premarket_news, run_ai_trader_test
+    s = copy.deepcopy(DEFAULTS)
+    names = ["S" + "".join(chr(65 + int(c)) for c in f"{k:03d}") for k in range(30)]
+    data = synth_market(30, seed=8, start=date(2024, 6, 3))
+    data["SPY"] = synth_market(1, seed=9, start=date(2024, 6, 3))["SAAA"]
+    rng = _r.Random(1)
+    news, leaks = {}, []
+    for sym in names:                                     # each day: news is good or bad, and moves the stock
+        df = data[sym]
+        for ts in df.index[1:]:
+            day = ts.tz_convert(NY).date()
+            if rng.random() < 0.5:
+                continue
+            good = rng.random() < 0.5
+            o = df.at[ts, "open"]
+            df.at[ts, "close"] = o * (1.03 if good else 0.97) * (1 + rng.gauss(0, 0.01))
+            t = datetime.combine(day, datetime.min.time(), NY).replace(hour=7)
+            news.setdefault(day, []).append({"headline": f"{sym} {'beats estimates' if good else 'misses badly'}",
+                                             "summary": "", "symbols": [sym], "time": t})
+            late = t.replace(hour=11)                     # published after the open: must never be used
+            news[day].append({"headline": f"{sym} LATE NEWS", "summary": "", "symbols": [sym], "time": late})
+
+    class B(SynthBroker):
+        def news_window(self, start, end, max_items=200):
+            out = [n for d in (start.date(), end.date()) for n in news.get(d, [])]
+            leaks.extend(n for n in out if n["time"] > end)
+            return out
+    broker = B(data)
+
+    class SmartLLM:
+        def chat_json(self, system, user, schema=None):
+            assert "LATE NEWS" not in user
+            return {"action": "buy" if "beats" in user else "short", "confidence": 0.8, "reasoning": "news"}
+
+    class CoinLLM:
+        def __init__(self):
+            self.r = _r.Random(3)
+
+        def chat_json(self, system, user, schema=None):
+            return {"action": self.r.choice(["buy", "short", "skip"]), "confidence": 0.5, "reasoning": "?"}
+    res = run_ai_trader_test(broker, s, SmartLLM(), date(2025, 1, 1), date(2026, 9, 30), 400)
+    assert "AI trader: PASS" in res.headline, res.headline
+    assert leaks                                           # the fake archive did offer late news ...
+    assert all(c.day > date(2025, 1, 1) for c in res.ai_cases)   # ... only days after the cutoff
+    assert {t["side"] for t in res.trades} == {"long", "short"}
+    coin = run_ai_trader_test(broker, s, CoinLLM(), date(2025, 1, 1), date(2026, 9, 30), 400)
+    assert "AI trader: FAIL" in coin.headline or "INCOMPLETE" in coin.headline, coin.headline
+    # premarket_news ignores market round-ups (3+ companies)
+    day = date(2025, 3, 4)
+    news[day] = [{"headline": "Market wrap", "summary": "", "symbols": ["AAA", "BBB", "CCC"],
+                  "time": datetime.combine(day, datetime.min.time(), NY).replace(hour=8)}]
+    assert premarket_news(broker, day, date(2025, 3, 3)) == {}
+    _ = pd

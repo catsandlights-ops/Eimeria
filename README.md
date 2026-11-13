@@ -300,6 +300,14 @@ The AI reads the news and can **veto** swing candidates. That's the one part of 
 
 **More reliable answers:** with **Ollama 0.5 or newer**, Eimeria requires the AI to answer in an exact format, so it never has to guess at a sloppy reply. A garbled answer gets one retry, and older Ollama versions fall back automatically. If the AI can't answer, swing trades are **kept**: a broken AI never blocks the strategy. The AI tab shows the speed and failure rate for the session, and has a *Speed test* button.
 
+### AI trader test: can the AI go long or short on the news?
+
+**AI tab → AI trader test.** For random past days after your model's training cutoff, the AI reads each company's headlines published between the previous close and 9:20 AM (only news that existed then) and answers **buy, short or skip**. Buys are bought at the open and sold at the close; shorts are the opposite. Results are measured against the S&P 500 over the same hours, after costs, so a rising or falling market doesn't count as skill.
+
+The rules are fixed in advance. The test **passes** only if the AI's trades make money in **both halves** of the period (40+ trades in each), with a t-statistic of 2 or more. Only then would Eimeria let the AI trade on its own, and only in paper trading first. Research (Lopez-Lira & Tang, 2023) found large AI models could predict next-day moves from headlines, mostly for small companies and bad news, and that the effect shrank over time. A small local model may do worse.
+
+Each answer takes about 5–15 seconds on a typical PC, so 300 answers take roughly 30–60 minutes. Set the cutoff **after** your model's release date (llama3.1 was released in July 2024), or the AI may "remember" what happened.
+
 ## Strategy health: is the edge still working?
 
 Edges fade as more traders find them. Whenever you run a swing backtest, Eimeria remembers its per-trade results. Once you have **10+ closed swing trades** (paper or live), the Swing tab and each evening's review compare them with the backtest:
