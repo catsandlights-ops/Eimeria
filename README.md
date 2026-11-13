@@ -161,7 +161,7 @@ The idea: trade overnight news only once the market confirms it. Buy a stock tha
 
 A first test (46 large stocks, 60 days) looked good: +0.55% and +0.33% per trade. **The full test didn't hold up.** Over 2 years on all liquid US stocks, confirmed gap-ups lost **0.22% per trade in the first half and 0.25% in the second** after costs (about 3,400 trades in each half), and the backtest lost 59% while the S&P 500 made 41%. They lost money even before costs. The short test had simply caught a lucky stretch.
 
-It stays in the app, off, for experiments only, with its own real-money lock (30 closed paper gap trades with a profit factor of 1.2+).
+It has been removed from Settings and can only be backtested.
 
 ---
 
@@ -176,7 +176,9 @@ A published effect (Gao, Han, Li & Zhou, *Journal of Financial Economics*, 2018)
 
 **Pass or fail was decided before seeing any results.** The average trade after costs must be positive **before 2024** (2019–2023) **and from 2024 on** (data the idea was never fitted to), with a t-statistic of at least 2 over the whole test. Anything else is a fail, and the idea is dropped rather than adjusted.
 
-**Run it:** Backtest tab → *Day trading: S&P 500 late-day momentum*. The dates are set to 2019 through yesterday for you. Click **Run backtest** and read the first line: PASS or FAIL. Only the backtest exists so far; live trading would be built only if it passes.
+**Run it:** Backtest tab → *Day trading: S&P 500 late-day momentum*. The dates are set to 2019 through yesterday for you. Click **Run backtest** and read the first line: PASS or FAIL. Only the backtest exists; live trading would be built only if it passes.
+
+**Result (2019–2026): FAIL.** The average trade lost 0.021% before 2024 and 0.023% from 2024 on, and it lost money even before costs. Since version 0.3.2 day trading is removed from Settings (and switched off in old settings files): every version tested lost money. The strategies remain in the Backtest tab for research.
 
 ---
 

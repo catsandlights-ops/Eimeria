@@ -425,18 +425,11 @@ class MainWindow(QMainWindow):
         g = QGroupBox("Strategies")
         f = QFormLayout(g)
         sw = s["swing"]
-        self.f_day_on = QCheckBox("Chart-pattern day trading: 5-minute scans (LOST money in testing)")
-        self.f_day_on.setChecked(s["day_trading"]["enabled"])
-        self.f_day_on.setToolTip("Backtests on real data found the day-trading signals did NOT beat costs.")
-        gp = s["gap_trading"]
-        self.f_gap_on = QCheckBox("Confirmed-gap day trading: buy 2%+ gap-ups that keep rising for 30 minutes "
-                                  "(LOST money in testing)")
-        self.f_gap_on.setChecked(gp["enabled"])
-        self.f_gap_on.setToolTip("A 2-year backtest on all liquid US stocks lost 0.22-0.25% per trade after costs "
-                                 "in both halves. Kept only for experiments; real money stays locked until 30 paper "
-                                 "gap trades close with a profit factor of 1.2+.")
-        self.f_gap_short = QCheckBox("   ...also short confirmed gap-downs (inconsistent in testing)")
-        self.f_gap_short.setChecked(gp["allow_short"])
+        self.f_day_note = QLabel("Day trading was removed: every version tested on real data (chart signals, "
+                                 "confirmed gaps, S&P 500 late-day momentum) lost money, most even before costs. "
+                                 "You can still backtest them in the Backtest tab.")
+        self.f_day_note.setWordWrap(True)
+        self.f_day_note.setStyleSheet(f"color: {MUTED};")
         self.f_swing_on = QCheckBox("Swing trading: hold for days to weeks (see the Swing tab)")
         self.f_swing_on.setChecked(sw["enabled"])
         self.f_sw_insider = QCheckBox("Setup: insider buying")
@@ -468,9 +461,7 @@ class MainWindow(QMainWindow):
             "It reacts AFTER prices start falling; it can't see a crash coming.")
         self.f_sw_hold = QSpinBox(minimum=2, maximum=120, value=sw["hold_days"], suffix=" trading days")
         self.f_sw_max = QSpinBox(minimum=1, maximum=30, value=sw["max_positions"])
-        f.addRow("", self.f_day_on)
-        f.addRow("", self.f_gap_on)
-        f.addRow("", self.f_gap_short)
+        f.addRow("", self.f_day_note)
         f.addRow("", self.f_swing_on)
         f.addRow("", self.f_sw_insider)
         f.addRow("", self.f_sw_gap)
@@ -672,9 +663,6 @@ class MainWindow(QMainWindow):
         s["updates"]["check_on_start"] = self.f_upd_auto.isChecked()
         s["edge_gate"]["enabled"] = self.f_gate.isChecked()
         s["data"]["live_feed"] = self.f_feed.currentText()
-        s["day_trading"]["enabled"] = self.f_day_on.isChecked()
-        s["gap_trading"]["enabled"] = self.f_gap_on.isChecked()
-        s["gap_trading"]["allow_short"] = self.f_gap_short.isChecked()
         sw = s["swing"]
         sw["enabled"] = self.f_swing_on.isChecked()
         sw["setups"]["insider_buy"] = self.f_sw_insider.isChecked()

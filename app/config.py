@@ -270,6 +270,15 @@ def load_settings() -> dict:
         upd["branch"] = DEFAULTS["updates"]["branch"]
         if SETTINGS_PATH.exists():
             save_settings(settings)
+    # Day trading was removed after every tested version lost money (chart signals, confirmed gaps, S&P 500
+    # late-day momentum). It stays available only as a backtest, so it's switched off even in old settings files.
+    removed = [settings.setdefault(k, {}) for k in ("day_trading", "gap_trading")]
+    if any(r.get("enabled") or r.get("allow_short") for r in removed[1:]) or removed[0].get("enabled"):
+        for r in removed:
+            r["enabled"] = False
+        removed[1]["allow_short"] = False
+        if SETTINGS_PATH.exists():
+            save_settings(settings)
     if not SETTINGS_PATH.exists():
         save_settings(settings)
     return settings

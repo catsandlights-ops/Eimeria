@@ -1086,6 +1086,20 @@ def test_damaged_settings_file_does_not_stop_the_app(tmp_path, monkeypatch):
     assert config.SETTINGS_PROBLEM and list(tmp_path.glob("settings.broken-*.yaml"))
 
 
+def test_removed_day_trading_is_switched_off_in_old_settings(tmp_path, monkeypatch):
+    import yaml
+    from app import config
+    monkeypatch.setattr(config, "SETTINGS_PATH", tmp_path / "settings.yaml")
+    monkeypatch.setattr(config, "SETTINGS_PROBLEM", [])
+    (tmp_path / "settings.yaml").write_text("day_trading: {enabled: true}\n"
+                                            "gap_trading: {enabled: true, allow_short: true}\n")
+    s = config.load_settings()
+    assert not s["day_trading"]["enabled"] and not s["gap_trading"]["enabled"]
+    assert not s["gap_trading"]["allow_short"] and s["swing"]["enabled"]
+    saved = yaml.safe_load((tmp_path / "settings.yaml").read_text())
+    assert saved["day_trading"]["enabled"] is False and saved["gap_trading"]["enabled"] is False
+
+
 def test_crash_handler_writes_log(tmp_path, monkeypatch):
     import sys as _sys
     from app import config, main
