@@ -1,10 +1,8 @@
 {
-  "version": "0.2.3",
-  "commit": "81ffc6e06420bd2a4433d93c28dd84e0efe51a9c",
+  "version": "0.2.4",
+  "commit": "a358ea0a7bfdd975cffcb538ba10f8ac5282ea1b",
   "date": "2026-11-13",
   "notes": [
-    "Updates: 'Check for updates now' always shows a clear answer (your version, the newest version on GitHub, or the exact error)",
-    "Updates: old update settings from early versions are corrected automatically, and if one GitHub address is blocked a second one is tried",
-    "Self-test: new 'Updates (GitHub)' check"
+    "Self-test: missing live quotes outside market hours are reported as normal instead of as a warning"
   ]
 }
