@@ -112,8 +112,15 @@ def run_self_test(engine, settings: dict, order_test: bool, progress=lambda m: N
     def quote():
         q = b.quote("SPY")
         if not q:
-            return WARN, ("No live bid/ask quote. Orders still work, but the spread check is skipped and entries "
-                          "use the last price.")
+            try:
+                market_open = b.clock()["is_open"]
+            except Exception:
+                market_open = True
+            if not market_open:
+                return SKIP, ("No live bid/ask quote right now, which is normal while the market is closed. "
+                              "Run the self-test again during market hours (9:30-16:00 New York) to check quotes.")
+            return WARN, ("No live bid/ask quote although the market is open. Orders still work, but the spread "
+                          "check is skipped and entries use the last price.")
         spread = (q["ask"] - q["bid"]) / ((q["ask"] + q["bid"]) / 2)
         return PASS, f"Quote OK: bid {q['bid']:.2f} / ask {q['ask']:.2f} (spread {spread:.3%})."
     check("Live quotes", quote)

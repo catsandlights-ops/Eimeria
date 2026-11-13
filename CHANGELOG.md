@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.4 (2026-11-13)
+- Self-test: missing live quotes outside market hours are reported as normal instead of as a warning
+
 ## 0.2.3 (2026-11-13)
 - Updates: 'Check for updates now' always shows a clear answer (your version, the newest version on GitHub, or the exact error)
 - Updates: old update settings from early versions are corrected automatically, and if one GitHub address is blocked a second one is tried

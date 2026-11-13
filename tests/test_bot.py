@@ -1282,3 +1282,13 @@ def test_stale_update_settings_are_fixed_and_check_falls_back(tmp_path, monkeypa
     monkeypatch.setattr(updater.requests, "get", fake_get)
     up = updater.Updater(s)
     assert up.check()["version"] == "9.9.9" and "available" in up.last_status
+
+
+def test_self_test_quotes_when_market_closed(settings, journal, monkeypatch, tmp_path):
+    from app import config, selftest
+    monkeypatch.setattr(config, "BASE_DIR", tmp_path)
+    broker = FakeBroker()                                  # no quotes available
+    broker.clock = lambda: {"is_open": False, "timestamp": DAY, "next_open": DAY, "next_close": DAY}
+    eng = engine(settings, journal, broker)
+    checks = {c.name: c for c in selftest.run_self_test(eng, settings, order_test=False)}
+    assert checks["Live quotes"].status == "skipped" and "market is closed" in checks["Live quotes"].detail
