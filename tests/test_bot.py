@@ -458,7 +458,20 @@ def test_swing_live_cycle_and_day_flatten(journal):
     # A day trade alongside it: end-of-day closes ONLY the day trade
     eng.scan()
     assert {x["symbol"] for x in broker.held} == {"GAP", "UP"}
-    eng._flatten("end of day")
+    # A broker hiccup at the close: the flatten reports failure (so the engine retries) and alerts once
+    real_close, fails = broker.close_position, []
+
+    def flaky_close(sym):
+        fails.append(sym)
+        raise RuntimeError("broker timeout")
+    broker.close_position = flaky_close
+    sent = []
+    eng.alerts.send = lambda title, *a, **k: sent.append(title)
+    assert eng._flatten("end of day") is False and eng._flatten("end of day") is False
+    assert {x["symbol"] for x in broker.held} == {"GAP", "UP"} and fails == ["UP", "UP"]
+    assert sent == ["Could not close UP"]
+    broker.close_position = real_close
+    assert eng._flatten("end of day") is True
     assert broker.closed == ["UP"] and {x["symbol"] for x in broker.held} == {"GAP"}
     # Time exit after hold_days trading days
     entry_day = datetime.fromisoformat(t["entry_time"]).astimezone(NY).date()

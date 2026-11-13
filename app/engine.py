@@ -202,9 +202,10 @@ class Engine:
                 self._flatten("daily loss limit")
             mins_to_close = (clock["next_close"] - clock["timestamp"]).total_seconds() / 60
             if mins_to_close <= sched["close_all_minutes_before_close"]:
-                if self.journal.get("done_flatten") != today:
+                # Retry on every tick until every day trade is really closed (a broker hiccup at 3:55 must
+                # not leave a day trade open overnight); only then mark the day as done.
+                if self.journal.get("done_flatten") != today and self._flatten("end of day"):
                     self.journal.set("done_flatten", today)
-                    self._flatten("end of day")
             else:
                 self.manage_positions(positions)
                 self.check_protection()
@@ -343,11 +344,13 @@ class Engine:
             if not t["exit_reason"] and (style is None or t["style"] == style):
                 self.journal.update_trade(t["id"], exit_reason=reason)
 
-    def _flatten(self, why: str):
-        """Close every DAY trade. Swing trades are meant to be held overnight and keep their stop-losses."""
+    def _flatten(self, why: str) -> bool:
+        """Close every DAY trade. Swing trades are meant to be held overnight and keep their stop-losses.
+        Returns True when no day trade is left open (False: something failed, call again)."""
         day = [t for t in self.journal.open_trades() if t["style"] == "day"]
         held = {p["symbol"] for p in self.broker.positions()}
-        closed = []
+        closed, failed = [], []
+        alerted = self.__dict__.setdefault("_close_fail_alerted", set())
         for t in day:
             if t["symbol"] not in held:
                 if not self.broker.order_fill_price(t["order_id"] or ""):
@@ -359,10 +362,16 @@ class Engine:
                 self.broker.close_position(t["symbol"])
                 closed.append(t["symbol"])
             except Exception as e:
-                self._log(f"Could not close {t['symbol']}: {e}", level=logging.ERROR)
-                self.alerts.send(f"Could not close {t['symbol']}", f"{e}. Check your broker account!", "problem", True)
+                failed.append(t["symbol"])
+                self._log(f"Could not close {t['symbol']} (will retry): {e}", level=logging.ERROR)
+                key = (datetime.now().date().isoformat(), t["symbol"])
+                if key not in alerted:                     # one alert per stock per day, not one per retry
+                    alerted.add(key)
+                    self.alerts.send(f"Could not close {t['symbol']}", f"{e}. Eimeria keeps retrying until the "
+                                     "close; check your broker account!", "problem", True)
         if closed:
             self._log(f"Closed day trades ({why}): {', '.join(closed)}.")
+        return not failed
 
     # ------------------------------------------------------------------ position management
     def manage_positions(self, positions: list[dict]):
