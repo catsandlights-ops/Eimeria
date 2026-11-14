@@ -1,8 +1,8 @@
 {
-  "version": "0.4.3",
-  "commit": "e48bc5120c202399c5cd4e564694e8810f4d8375",
-  "date": "2026-11-13",
+  "version": "0.4.4",
+  "commit": "9808ee12bdb3dadbea69c833490061c8983d303c",
+  "date": "2026-11-14",
   "notes": [
-    "AI trader test, version 3: the AI reacts to news published DURING market hours. It uses its plan from the evening before, and the entry is delayed realistically (the AI's real answer time plus a minute). The results show how much being slower than professional traders costs."
+    "Fairer stock lists for the momentum and earnings tests: every stock that traded enough in ANY year of the test, including companies that were later delisted, instead of only the stocks that trade today. Before, the tests only saw the survivors, which made results look better than they were. The first run downloads more data and takes longer."
   ]
 }
