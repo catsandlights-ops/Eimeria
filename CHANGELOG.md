@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.4.4 (2026-11-14)
+- Fairer stock lists for the momentum and earnings tests: every stock that traded enough in ANY year of the test, including companies that were later delisted, instead of only the stocks that trade today. Before, the tests only saw the survivors, which made results look better than they were. The first run downloads more data and takes longer.
+
 ## 0.4.3 (2026-11-13)
 - AI trader test, version 3: the AI reacts to news published DURING market hours. It uses its plan from the evening before, and the entry is delayed realistically (the AI's real answer time plus a minute). The results show how much being slower than professional traders costs.
 
