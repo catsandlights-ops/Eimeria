@@ -1885,3 +1885,25 @@ def test_ai_trader_test_v3_news_reaction():
     assert all(c.extra["real"]["entry_time"] >= c.extra["news_time"] + timedelta(seconds=V3_SAFETY_S)
                for c in traded)
     assert {t["side"] for t in res.trades} == {"long", "short"} and res.version == 3
+
+
+def test_history_universe_includes_fallen_and_delisted_stocks():
+    from app.research import history_universe
+    s = copy.deepcopy(DEFAULTS)
+    data = synth_market(3, seed=20, start=date(2019, 1, 2))
+    a, b, c = list(data)
+    data[b].loc[data[b].index >= "2022-01-01", "volume"] = 10.0          # was liquid, now tiny: keep
+    data[c] = data[c][data[c].index < "2021-06-01"]                        # delisted in 2021: keep
+    tiny = synth_market(1, seed=21, start=date(2019, 1, 2))["SAAA"]
+    tiny["volume"] = 10.0
+    data["TINY"] = tiny                                                    # never liquid: drop
+
+    class B(SynthBroker):
+        def tradable_symbols(self):
+            return [a, b, "TINY"]
+
+        def delisted_symbols(self):
+            return [c]
+    px, info = history_universe(B(data), s, 20e6, date(2019, 1, 2), date(2026, 10, 30))
+    assert set(info["symbols"]) == {a, b, c} and info["delisted_kept"] == 1
+    assert set(px) == {a, b, c} and str(px[a]["close"].dtype) == "float32"

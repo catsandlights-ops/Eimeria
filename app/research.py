@@ -10,7 +10,7 @@ Every fixed test follows the same protocol, decided before any results were seen
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 import numpy as np
 import pandas as pd
@@ -140,20 +140,42 @@ def _norm_daily(df: pd.DataFrame) -> pd.DataFrame:
 
 
 # ------------------------------------------------------------------ data
-def liquid_universe(broker, settings: dict, min_dollar_volume: float, emit=lambda m: None) -> list[str]:
-    """Tradable US stocks/ETFs whose average daily $ volume over the last ~3 months is at least the minimum.
-    Note: this is TODAY's list, so companies that were delisted are missing (survivorship bias)."""
+def history_universe(broker, settings: dict, min_dollar_volume: float, start: date, end: date,
+                     emit=lambda m: None, keep_data: bool = True) -> tuple[dict, dict]:
+    """Stocks that traded at least `min_dollar_volume` a day on average in ANY calendar year of the period,
+    including companies that were delisted since (when Alpaca still has their prices). This avoids testing only
+    on the survivors. Each test still checks liquidity at the time of every trade, using past data only.
+    Returns (prices per symbol if keep_data else {}, info dict)."""
     feed = settings["backtest"].get("data_feed", "sip")
-    emit("Getting the list of tradable US stocks...")
-    syms = sorted(broker.tradable_symbols())
-    end = date.today() - timedelta(days=1)
-    keep = []
+    emit("Getting the list of US stocks, including delisted ones...")
+    active = set(broker.tradable_symbols())
+    try:
+        gone = set(getattr(broker, "delisted_symbols", lambda: [])()) - active
+    except Exception:
+        gone = set()
+    syms = sorted(active | gone)
+    keep, data, kept_gone = [], {}, 0
     for i in range(0, len(syms), 200):
-        emit(f"Checking which stocks trade enough: {i}/{len(syms)}...")
-        for s, df in broker.daily_range(syms[i:i + 200], end - timedelta(days=95), end, feed=feed).items():
-            if df is not None and len(df) >= 20 and float((df["close"] * df["volume"]).mean()) >= min_dollar_volume:
-                keep.append(s)
-    return keep
+        emit(f"Price history for {len(syms)} stocks (incl. {len(gone)} delisted): {i}/{len(syms)}... "
+             "(slow the first time)")
+        for s, df in broker.daily_range(syms[i:i + 200], start, end, feed=feed).items():
+            if df is None or len(df) < 20:
+                continue
+            idx = df.index.tz_convert(None) if getattr(df.index, "tz", None) is not None else df.index
+            dv = pd.Series((df["close"] * df["volume"]).values, index=idx)
+            if float(dv.groupby(dv.index.year).mean().max()) < min_dollar_volume:
+                continue
+            keep.append(s)
+            kept_gone += s in gone
+            if keep_data:
+                data[s] = df[["open", "high", "low", "close", "volume"]].astype("float32")
+    return data, {"symbols": keep, "delisted_kept": kept_gone, "checked": len(syms), "delisted_checked": len(gone)}
+
+
+def universe_note(info: dict) -> str:
+    return (f"Universe: {len(info['symbols'])} stocks that traded enough in at least one year of the test, including "
+            f"{info['delisted_kept']} that were later delisted ({info['delisted_checked']} delisted tickers checked; "
+            "ones Alpaca has no prices for are still missing).")
 
 
 def load_daily(broker, settings: dict, syms: list[str], start: date, end: date, emit=lambda m: None,

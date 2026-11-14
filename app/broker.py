@@ -122,6 +122,18 @@ class AlpacaBroker:
         return sorted(a.symbol for a in assets if a.tradable and str(getattr(a.exchange, "value", a.exchange)) in ok
                       and re.fullmatch(r"[A-Z]{1,5}", a.symbol or ""))
 
+    def delisted_symbols(self) -> list[str]:
+        """US stocks/ETFs that are no longer trading (delisted, merged, bankrupt). Used by backtests so they
+        don't only see the companies that survived. A ticker may since have been reused by another company."""
+        import re
+        from alpaca.trading.enums import AssetClass, AssetStatus
+        from alpaca.trading.requests import GetAssetsRequest
+        assets = self.trading.get_all_assets(GetAssetsRequest(status=AssetStatus.INACTIVE,
+                                                               asset_class=AssetClass.US_EQUITY))
+        ok = {"NYSE", "NASDAQ", "ARCA", "NYSEARCA", "AMEX", "BATS"}
+        return sorted({a.symbol for a in assets if str(getattr(a.exchange, "value", a.exchange)) in ok
+                       and re.fullmatch(r"[A-Z]{1,5}", a.symbol or "")})
+
     # ---------- market data ----------
     def _feed(self, feed: str | None):
         from alpaca.data.enums import DataFeed

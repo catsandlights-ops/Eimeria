@@ -19,8 +19,8 @@ import pandas as pd
 
 from . import config
 from .backtest import Backtester, BTResult
-from .research import (HOLDOUT_START, _norm_daily, dev_holdout_periods, event_returns, headline, liquid_ok_at,
-                       liquid_universe, load_daily, split_row, verdict_line)
+from .research import (HOLDOUT_START, _norm_daily, dev_holdout_periods, event_returns, headline, history_universe,
+                       liquid_ok_at, load_daily, split_row, universe_note, verdict_line)
 from .swing import Event, SwingBacktester, insider_events, prepare
 
 
@@ -104,7 +104,8 @@ def run_earnings_drift(broker, settings: dict, start: date, end: date, emit=lamb
     from .sec_earnings import eps_history, surprises, ticker_map
     ua = _sec_contact(settings)
     cache = config.BASE_DIR / "cache"
-    universe = liquid_universe(broker, settings, 5e6, emit)
+    _, info = history_universe(broker, settings, 5e6, start - timedelta(days=120), end, emit, keep_data=False)
+    universe = info["symbols"]
     tmap = ticker_map(cache, ua)
     ciks = {t: tmap[t] for t in universe if t in tmap}
     eps = eps_history(ciks, cache / "eps", ua, emit)
@@ -141,7 +142,8 @@ def run_earnings_drift(broker, settings: dict, start: date, end: date, emit=lamb
     res.notes.append(f"{len(eps)} companies with SEC earnings data; {len(beats)} big beats and {len(misses)} big "
                      f"misses. Results are vs the S&P 500 over the same days, after costs (bps; 100 bps = 1%). The "
                      "signal date is the day the 10-Q report was filed, which can be after the earnings "
-                     "announcement. Universe: stocks trading $5M+ a day TODAY (delisted companies are missing).")
+                     "announcement. Stocks that traded $5M+ a day in any year of the test; delisted companies are "
+                     "only included if the SEC's current ticker list still has them, so most are missing.")
     return res
 
 
@@ -191,9 +193,9 @@ def _monthly_equity(res: BTResult, start: date, months: list[tuple[date, float]]
 
 
 def run_momentum(broker, settings: dict, start: date, end: date, emit=lambda m: None) -> BTResult:
-    universe = liquid_universe(broker, settings, 20e6, emit)
-    daily = load_daily(broker, settings, sorted(set(universe) | {"SPY"}),
-                       start - timedelta(days=400), end, emit)
+    daily, info = history_universe(broker, settings, 20e6, start - timedelta(days=400), end, emit)
+    if "SPY" not in daily:
+        daily.update(load_daily(broker, settings, ["SPY"], start - timedelta(days=400), end, emit))
     emit("Simulating month by month...")
     close, open_, dv = _panels(daily)
     spy_close, spy_open = close.pop("SPY") if "SPY" in close else None, open_.pop("SPY") if "SPY" in open_ else None
@@ -261,8 +263,8 @@ def run_momentum(broker, settings: dict, start: date, end: date, emit=lambda m: 
     res.headline = headline([verdict_line("Momentum", df["excess"], df["day"], 12, unit="bps a month")])
     res.notes.append(f"Each month: the {MOM_UNIVERSE} most-traded stocks ($5+), ranked by their return from 12 "
                      f"months to 1 month ago; the top {MOM_HOLD} are held in equal amounts until the next month "
-                     f"(costs {MOM_COST:.2%} per trade). The test compares them with ALL {MOM_UNIVERSE}, so the "
-                     "survivorship bias of using today's stock list affects both sides.")
+                     f"(costs {MOM_COST:.2%} per trade). The test compares them with ALL {MOM_UNIVERSE}. "
+                     + universe_note(info))
     return res
 
 
