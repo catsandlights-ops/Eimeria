@@ -12,9 +12,12 @@ from ..swing_live import trading_days_between
 class SwingTab(QWidget):
     def __init__(self, window):
         super().__init__()
-        from .main_window import MUTED, make_table
+        from .main_window import make_table
+        from .ui import section_title
         self.win = window
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(12)
         info = QLabel(
             "Swing trades are held for weeks (default 40 trading days) instead of minutes. After the close the bot "
             "looks for fresh insider purchases of $1M+ in stocks that are in an uptrend (plus big news jumps, if you "
@@ -22,7 +25,7 @@ class SwingTab(QWidget):
             "morning with a stop-loss, and sold after the holding period. Swing trades are NOT closed at the end of "
             "the day. Crash protection (Settings) can pause new buys when the S&P 500 is below its 10-month average.")
         info.setWordWrap(True)
-        info.setStyleSheet(f"color: {MUTED};")
+        info.setObjectName("help")
         lay.addWidget(info)
         row = QHBoxLayout()
         b = QPushButton("Make tomorrow's plan now")
@@ -35,13 +38,13 @@ class SwingTab(QWidget):
         self.health = QLabel()
         self.health.setWordWrap(True)
         lay.addWidget(self.health)
-        lay.addWidget(QLabel("Plan for the next session"))
+        lay.addWidget(section_title("Plan for the next session"))
         self.plan_table = make_table(["Symbol", "Setup", "Why", "AI review"])
         lay.addWidget(self.plan_table, 1)
-        lay.addWidget(QLabel("Open swing positions"))
+        lay.addWidget(section_title("Open swing positions"))
         self.open_table = make_table(["Symbol", "Setup", "Shares", "Entry", "Stop", "Days held", "Days left", "Why"])
         lay.addWidget(self.open_table, 1)
-        lay.addWidget(QLabel("Closed swing trades by setup"))
+        lay.addWidget(section_title("Closed swing trades by setup"))
         self.setup_table = make_table(["Setup", "Trades", "Win rate", "Avg per trade", "P&L $", "Profit factor"])
         lay.addWidget(self.setup_table)
         self.refresh()

@@ -92,7 +92,7 @@ class GettingStarted(QGroupBox):
                          "factor of 1.2+ (progress on the Swing tab and Learning tab). With 40-day holds that "
                          "takes a few months: that's expected.")
         self.footer.setText("\n".join(lines))
-        self.footer.setStyleSheet(f"color: {MUTED};")
+        self.footer.setObjectName("help")
 
     def hide_forever(self):
         self.win.ctx.journal.set("hide_getting_started", True)
@@ -102,7 +102,7 @@ class GettingStarted(QGroupBox):
     def act(self, key: str):
         w = self.win
         if key == "keys":
-            w.tabs.setCurrentIndex(w.tabs.count() - 1)
+            w.show_settings("Broker account")
         elif key == "selftest":
             w.open_self_test()
         elif key == "sec":

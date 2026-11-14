@@ -9,7 +9,7 @@ from PySide6.QtCharts import QChart, QChartView, QDateTimeAxis, QLineSeries, QVa
 from PySide6.QtCore import QDate, QDateTime, QObject, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import (
-    QApplication, QFrame, QPlainTextEdit, QScrollArea, QComboBox, QDateEdit, QDoubleSpinBox, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
+    QApplication, QFrame, QPlainTextEdit, QScrollArea, QComboBox, QDateEdit, QDoubleSpinBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
     QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
@@ -34,9 +34,10 @@ class BacktestTab(QWidget):
         self.bridge.progress.connect(lambda m: self.status.setText(m))
         self.bridge.done.connect(self._on_done)
 
-        from .main_window import MUTED, StatCard, make_table  # avoid circular import at load time
+        from .main_window import StatCard, make_table  # avoid circular import at load time
         self._make_table = make_table
         s = window.ctx.settings
+        from .ui import MARGIN, SPACING, card, form, help_label, section_title
         # Everything scrolls, so the chart and results never get squashed on smaller screens
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -47,18 +48,11 @@ class BacktestTab(QWidget):
         scroll.setWidget(inner)
         outer.addWidget(scroll)
         lay = QVBoxLayout(inner)
-        info = QLabel(
-            "Replays past market data through the bot's rules, including trading costs. Swing: insider "
-            "purchases from the SEC's records (2006 onward; needs your SEC contact in Settings) on daily prices. "
-            "Tests marked 'fixed test' have rules set in advance: pick one, keep the dates (2019 to yesterday) and "
-            "it says PASS or FAIL (it must work before 2024 AND from 2024 on). Some download a lot of data the "
-            "first time. The AI's news judgement can't be replayed, so it isn't part of any test.")
-        info.setWordWrap(True)
-        info.setStyleSheet(f"color: {MUTED};")
-        lay.addWidget(info)
+        lay.setContentsMargins(MARGIN, MARGIN, MARGIN, MARGIN)
+        lay.setSpacing(SPACING)
 
-        form = QHBoxLayout()
-        f1, f2 = QFormLayout(), QFormLayout()
+        box, bl = card("Test setup", "Replays past market data through a strategy's rules, including trading "
+                                     "costs. The AI's news judgement can't be replayed here: test it in the AI tab.")
         self.symbols = QLineEdit(", ".join(s["watchlist"]))
         self.start = QDateEdit(QDate.currentDate().addMonths(-3), calendarPopup=True)
         self.end = QDateEdit(QDate.currentDate().addDays(-1), calendarPopup=True)
@@ -71,31 +65,36 @@ class BacktestTab(QWidget):
         self.slip = QDoubleSpinBox(minimum=0, maximum=1, decimals=3, singleStep=0.01, suffix=" %",
                                    value=s["backtest"]["slippage_pct"] * 100)
         self.strategy = QComboBox()
-        self.strategy.addItems(["Swing trading (daily bars, hold days-weeks)",
+        self.strategy.addItems(["Swing trading: insider buying (your main strategy)",
                                 "Day trading: chart signals (LOST money in testing)",
                                 "Day trading: confirmed gaps (LOST money in testing)",
-                                "Day trading: S&P 500 late-day momentum (SPY, 1 trade a day, fixed test)",
-                                "Swing: insider clusters and CEO/CFO buys (SEC data, fixed test)",
-                                "Swing: earnings drift after big earnings beats (SEC data, fixed test)",
-                                "Monthly: momentum, hold last year's 50 biggest winners (fixed test)",
+                                "Day trading: S&P 500 late-day momentum (fixed test: FAILED)",
+                                "Swing: insider clusters and CEO/CFO buys (fixed test)",
+                                "Swing: earnings drift after big earnings beats (fixed test)",
+                                "Monthly: momentum, last year's 50 biggest winners (fixed test)",
                                 "Monthly: trend following across stocks, bonds, gold, real estate (fixed test)"])
         self.universe = QComboBox()
         self.universe.addItems(["My stock list", "My list + every stock insiders bought (slower)"])
         self.universe.setToolTip("Insider buying happens mostly in smaller companies. Testing only your list "
                                  "misses most insider trades.")
-        self.strategy.currentIndexChanged.connect(self._strategy_changed)
-        self.score.setEnabled(False)
-        f1.addRow("Strategy", self.strategy)
-        f1.addRow("Stocks", self.symbols)
-        f1.addRow("Swing universe", self.universe)
-        f1.addRow("From", self.start)
-        f1.addRow("To", self.end)
-        f2.addRow("Entry score needed", self.score)
-        f2.addRow("Starting money", self.equity)
-        f2.addRow("Cost per fill (slippage)", self.slip)
-        form.addLayout(f1, 2)
-        form.addLayout(f2, 1)
-        lay.addLayout(form)
+        self.strategy_help = help_label("")
+        top = form()
+        top.addRow("Strategy", self.strategy)
+        top.addRow(self.strategy_help)
+        bl.addLayout(top)
+        cols = QHBoxLayout()
+        cols.setSpacing(24)
+        self.f_left, self.f_right = form(), form()
+        self.f_left.addRow("Stocks", self.symbols)
+        self.f_left.addRow("Stock universe", self.universe)
+        self.f_left.addRow("From", self.start)
+        self.f_left.addRow("To", self.end)
+        self.f_right.addRow("Starting money", self.equity)
+        self.f_right.addRow("Cost per trade (slippage)", self.slip)
+        self.f_right.addRow("Entry score needed", self.score)
+        cols.addLayout(self.f_left, 3)
+        cols.addLayout(self.f_right, 2)
+        bl.addLayout(cols)
 
         row = QHBoxLayout()
         self.run_btn = QPushButton("Run backtest")
@@ -106,6 +105,7 @@ class BacktestTab(QWidget):
         self.apply_btn.setToolTip("Sets the bot's signal weights to the ones suggested by this backtest")
         self.apply_btn.clicked.connect(self.apply_weights)
         self.status = QLabel("")
+        self.status.setWordWrap(True)
         self.copy_btn = QPushButton("Copy results")
         self.copy_btn.setToolTip("Copies the numbers and the summary as text, e.g. to paste into a chat")
         self.copy_btn.setEnabled(False)
@@ -114,7 +114,10 @@ class BacktestTab(QWidget):
         row.addWidget(self.copy_btn)
         row.addWidget(self.apply_btn)
         row.addWidget(self.status, 1)
-        lay.addLayout(row)
+        bl.addLayout(row)
+        lay.addWidget(box)
+        lay.addWidget(section_title("Results"))
+        self.strategy.currentIndexChanged.connect(self._strategy_changed)
 
         cards = QHBoxLayout()
         self.c_ret, self.c_pf, self.c_win = StatCard("Total return"), StatCard("Profit factor"), StatCard("Win rate")
@@ -124,9 +127,9 @@ class BacktestTab(QWidget):
         lay.addLayout(cards)
         self.verdict = QPlainTextEdit()               # scrolls instead of pushing the chart off the screen
         self.verdict.setReadOnly(True)
-        self.verdict.setMinimumHeight(70)
-        self.verdict.setMaximumHeight(130)
-        self.verdict.setStyleSheet("font-size: 10.5pt;")
+        self.verdict.setMinimumHeight(110)
+        self.verdict.setMaximumHeight(190)
+        self.verdict.setPlaceholderText("Run a backtest to see the verdict here.")
         lay.addWidget(self.verdict)
 
         split = QSplitter(Qt.Horizontal)
@@ -153,15 +156,34 @@ class BacktestTab(QWidget):
         tabs.addTab(self.sig_table, "Signal quality")
         split.addWidget(tabs)
         split.setSizes([600, 600])
-        split.setMinimumHeight(340)
+        split.setMinimumHeight(440)
         lay.addWidget(split, 1)
+        self._strategy_changed(0)
 
     # ------------------------------------------------------------------
+    HELP = [
+        "Buys stocks after company insiders bought $1M+ of their own shares, holds about 40 trading days. "
+        "Choose 'every stock insiders bought' to test it properly (needs your SEC contact in Settings).",
+        "Chart patterns on 5-minute prices. Lost money after costs in testing; kept for research only.",
+        "Buys stocks that gapped up on overnight news and kept rising for 30 minutes. Lost money over 2 years.",
+        "Rules fixed in advance. Failed: lost money both before and after 2024, even before costs.",
+        "Rules fixed in advance: 3+ insiders buying together, or the CEO/CFO buying. Keep the dates; the "
+        "result says PASS or FAIL (must work before 2024 AND from 2024 on). Needs your SEC contact.",
+        "Rules fixed in advance: buys after a big earnings beat, holds 60 days. Downloads SEC earnings data "
+        "the first time (slow). Result: PASS or FAIL.",
+        "Rules fixed in advance: each month, hold the 50 stocks that rose most over the past year, including "
+        "delisted companies. Downloads 8 years of prices the first time (up to ~30 min). Result: PASS or FAIL.",
+        "Rules fixed in advance: 5 funds, each held only while above its 10-month average. Passes if it gives "
+        "a better return per unit of risk than holding them. Result: PASS or FAIL.",
+    ]
+
     def _strategy_changed(self, i: int):
-        self.universe.setEnabled(i in (0, 2))
+        self.strategy_help.setText(self.HELP[i])
+        self.f_left.setRowVisible(self.symbols, i < 3)          # fixed tests choose their own stocks
+        self.f_left.setRowVisible(self.universe, i in (0, 2))
+        self.f_right.setRowVisible(self.score, i == 1)
         self.score.setEnabled(i == 1)
         self.apply_btn.setVisible(i == 1)                 # signal weights only exist for chart signals
-        self.symbols.setEnabled(i < 3)                    # fixed tests choose their own stocks
         if i >= 3:                                        # the fair test: development years + unseen years
             self.start.setDate(QDate(2019, 1, 2))
             self.end.setDate(QDate.currentDate().addDays(-1))
@@ -294,7 +316,9 @@ class BacktestTab(QWidget):
                 "pf": pf if pf != float("inf") else 99.0,
                 "halves": " / ".join(f"PF {h['profit_factor']:.2f}" for h in res.halves)})
             self.win.getting_started.refresh()
-        self.result_tabs.setCurrentIndex(0 if res.edge_table else 1)   # swing results have no edge table
+        self.result_tabs.setTabVisible(0, bool(res.edge_table))            # swing results have no edge table
+        self.result_tabs.setTabVisible(2, bool(res.signal_quality))        # only chart-signal tests have these
+        self.result_tabs.setCurrentIndex(0 if res.edge_table else 1)
         gap_result = bool(res.trades) and res.trades[0].get("setup") == "gap_confirmed" or \
             any("gap up" in r.get("band", "") or "gap down" in r.get("band", "") for r in res.edge_table)
         momentum_result = bool(res.headline)              # fixed tests: development vs holdout columns

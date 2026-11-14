@@ -20,7 +20,7 @@ class _Bridge(QObject):
 class SelfTestDialog(QDialog):
     def __init__(self, window):
         super().__init__(window)
-        from .main_window import MUTED, STYLE, make_table
+        from .main_window import STYLE, make_table
         self.win = window
         self.setWindowTitle("Eimeria self-test")
         self.resize(1100, 620)
@@ -33,7 +33,7 @@ class SelfTestDialog(QDialog):
         info = QLabel("Checks every connection Eimeria needs: your Alpaca account, prices, news, the SEC, your local AI, "
                       "and (optionally) placing an order. Takes about a minute. Nothing here trades for real.")
         info.setWordWrap(True)
-        info.setStyleSheet(f"color: {MUTED};")
+        info.setObjectName("help")
         lay.addWidget(info)
         self.order = QCheckBox("Include a test order: places 1 share of SPY far below the market price on your PAPER "
                                "account (can't fill), then cancels it. Never runs on a live account.")

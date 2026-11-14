@@ -7,41 +7,18 @@ import webbrowser
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QAbstractItemView, QCheckBox, QComboBox, QStyle, QSystemTrayIcon, QDoubleSpinBox, QFormLayout, QFrame,
-    QGroupBox, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QScrollArea, QSpinBox,
+    QAbstractItemView, QCheckBox, QComboBox, QStyle, QSystemTrayIcon, QDoubleSpinBox, QFrame,
+    QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QSpinBox,
     QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from .. import config, system
 from ..indicators import SIGNALS
 
-GREEN, RED, MUTED = "#3fb950", "#f85149", "#8b949e"
-
-STYLE = """
-QWidget { background: #0d1117; color: #e6edf3; font-size: 10pt; }
-QTabWidget::pane { border: 1px solid #30363d; border-radius: 6px; }
-QTabBar::tab { background: #161b22; padding: 8px 16px; border: 1px solid #30363d; border-bottom: none;
-               border-top-left-radius: 6px; border-top-right-radius: 6px; margin-right: 2px; color: #8b949e; }
-QTabBar::tab:selected { background: #0d1117; color: #e6edf3; }
-QPushButton { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 7px 14px; }
-QPushButton:hover { background: #30363d; }
-QPushButton#start { background: #238636; border-color: #2ea043; font-weight: bold; }
-QPushButton#stop { background: #9e6a03; border-color: #bb8009; font-weight: bold; }
-QPushButton#kill { background: #b62324; border-color: #da3633; font-weight: bold; }
-QTableWidget { gridline-color: #21262d; background: #0d1117; alternate-background-color: #111821;
-               border: 1px solid #30363d; border-radius: 6px; }
-QTableWidget::item:selected { background: #1f3a5f; color: #e6edf3; }
-QHeaderView::section { background: #161b22; padding: 6px; border: none; border-bottom: 1px solid #30363d;
-                       color: #8b949e; font-weight: bold; }
-QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit, QListWidget {
-    background: #010409; border: 1px solid #30363d; border-radius: 6px; padding: 4px; }
-QGroupBox { border: 1px solid #30363d; border-radius: 6px; margin-top: 14px; padding-top: 10px; font-weight: bold; }
-QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #8b949e; }
-QCheckBox::indicator { width: 15px; height: 15px; border: 1px solid #6e7681; border-radius: 3px; background: #010409; }
-QCheckBox::indicator:checked { background: #238636; border-color: #2ea043; }
-QFrame#card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; }
-"""
+from .ui import (  # noqa: F401  (re-exported: other screens import these from here)
+    GREEN, MUTED, RED, STYLE, card, help_label, install_wheel_guard, page, section_title,
+)
 
 
 class Bridge(QObject):
@@ -69,6 +46,10 @@ def make_table(headers: list[str]) -> QTableWidget:
     t.setSelectionBehavior(QAbstractItemView.SelectRows)
     t.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
     t.horizontalHeader().setStretchLastSection(True)
+    t.horizontalHeader().setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+    t.verticalHeader().setDefaultSectionSize(32)
+    t.setShowGrid(False)
+    t.setWordWrap(False)
     return t
 
 
@@ -96,16 +77,18 @@ class StatCard(QFrame):
         super().__init__()
         self.setObjectName("card")
         lay = QVBoxLayout(self)
+        lay.setContentsMargins(14, 10, 14, 12)
+        lay.setSpacing(2)
         t = QLabel(title)
-        t.setStyleSheet(f"color: {MUTED}; background: transparent;")
+        t.setStyleSheet(f"color: {MUTED}; font-size: 9.5pt;")
         self.value = QLabel("-")
-        self.value.setStyleSheet("font-size: 18pt; font-weight: bold; background: transparent;")
+        self.value.setStyleSheet("font-size: 18pt; font-weight: bold;")
         lay.addWidget(t)
         lay.addWidget(self.value)
 
     def set(self, text: str, color: str | None = None):
         self.value.setText(text)
-        self.value.setStyleSheet(f"font-size: 18pt; font-weight: bold; background: transparent; color: {color or '#e6edf3'};")
+        self.value.setStyleSheet(f"font-size: 18pt; font-weight: bold; color: {color or '#e6edf3'};")
 
 
 class MainWindow(QMainWindow):
@@ -119,14 +102,18 @@ class MainWindow(QMainWindow):
         from ..version import VERSION
         self.setWindowTitle(f"Eimeria {VERSION}")
         self.quitting_for_update = False
-        self.resize(1280, 840)
+        self.resize(1360, 900)
         self.setStyleSheet(STYLE)
+        self._wheel_guard = install_wheel_guard()     # scrolling never changes a setting by accident
 
         central = QWidget()
         root = QVBoxLayout(central)
+        root.setContentsMargins(12, 10, 12, 10)
+        root.setSpacing(8)
         root.addLayout(self._build_top_bar())
         splitter = QSplitter(Qt.Vertical)
         self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(False)
         self.tabs.addTab(self._build_dashboard(), "Dashboard")
         self.tabs.addTab(self._build_signals(), "Signals")
         from .swing_tab import SwingTab
@@ -210,140 +197,157 @@ class MainWindow(QMainWindow):
         return bar
 
     def _build_dashboard(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
+        w, lay = page(scroll=True)
         from .getting_started import GettingStarted
         self.getting_started = GettingStarted(self)
         lay.addWidget(self.getting_started)
         cards = QHBoxLayout()
+        cards.setSpacing(12)
         self.c_equity, self.c_today = StatCard("Account value"), StatCard("Today's P&L")
         self.c_bp, self.c_win, self.c_total = StatCard("Buying power"), StatCard("Win rate"), StatCard("Bot P&L (all time)")
         for c in (self.c_equity, self.c_today, self.c_bp, self.c_win, self.c_total):
             cards.addWidget(c)
         lay.addLayout(cards)
-        lay.addWidget(QLabel("Open positions"))
+        box, bl = card("Open positions")
         self.pos_table = make_table(["Symbol", "Side", "Shares", "Entry", "Price", "P&L $", "P&L %"])
-        lay.addWidget(self.pos_table)
-        actions = QHBoxLayout()
-        for label, task, tip in [
+        self.pos_table.setMinimumHeight(220)
+        bl.addWidget(self.pos_table)
+        lay.addWidget(box, 1)
+        box, bl = card("Actions", "Run a step now instead of waiting for its scheduled time. Hover over a button "
+                                  "for details.")
+        from PySide6.QtWidgets import QGridLayout
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        for i, (label, task, tip) in enumerate([
             ("Refresh", "refresh", "Reload account and positions"),
-            ("Run pre-market briefing now", "briefing", "Read the news and write today's briefing"),
-            ("Scan stocks now", "scan", "Analyze stocks now (orders only sent while the market is open)"),
-            ("Run after-close review now", "review", "Review today's trades and learn from them"),
-            ("Check insider buying", "insiders", "Download recent SEC insider purchase filings"),
             ("Check stop-losses", "protect", "Make sure every open position has a stop-loss at the broker"),
+            ("Check insider buying", "insiders", "Download recent SEC insider purchase filings"),
             ("Self-test", "selftest", "Check every connection: Alpaca, prices, news, SEC, local AI, orders"),
-        ]:
+            ("Run pre-market briefing", "briefing", "Read the news and write today's briefing"),
+            ("Run after-close review", "review", "Review today's trades and learn from them"),
+            ("Scan stocks", "scan", "Analyze stocks now (orders only sent while the market is open)"),
+        ]):
             b = QPushButton(label)
             b.setToolTip(tip)
             b.clicked.connect(lambda _=False, t=task: self.run_task(t))
-            actions.addWidget(b)
-        actions.addStretch()
-        lay.addLayout(actions)
+            grid.addWidget(b, i // 4, i % 4)
+        bl.addLayout(grid)
+        lay.addWidget(box)
         return w
 
     def _build_signals(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        info = QLabel("Latest scan. Score: -1 strongly bearish ... +1 strongly bullish. The strongest few "
-                      "are checked against the news and sent to the AI for a decision.")
-        info.setWordWrap(True)
-        info.setStyleSheet(f"color: {MUTED};")
-        lay.addWidget(info)
+        w, lay = page()
+        lay.addWidget(help_label("Latest scan. Score: -1 strongly bearish ... +1 strongly bullish. The strongest "
+                                 "few are checked against the news and sent to the AI for a decision."))
         self.sig_table = make_table(["Symbol", "Price", "Change", "RSI", "Rel. volume", "Score", "AI decision",
                                      "Confidence", "AI reasoning"])
-        lay.addWidget(self.sig_table)
+        lay.addWidget(self.sig_table, 1)
         return w
 
     def _build_news(self):
-        w = QSplitter(Qt.Horizontal)
+        w, lay = page()
+        split = QSplitter(Qt.Horizontal)
         left = QWidget()
         ll = QVBoxLayout(left)
-        ll.addWidget(QLabel("Pre-market briefing"))
+        ll.setContentsMargins(0, 0, 8, 0)
+        ll.addWidget(section_title("Pre-market briefing"))
         self.briefing_box = QTextEdit(readOnly=True)
-        ll.addWidget(self.briefing_box)
-        ll.addWidget(QLabel("After-close review"))
+        ll.addWidget(self.briefing_box, 1)
+        ll.addWidget(section_title("After-close review"))
         self.review_box = QTextEdit(readOnly=True)
-        ll.addWidget(self.review_box)
+        ll.addWidget(self.review_box, 1)
         right = QWidget()
         rl = QVBoxLayout(right)
-        rl.addWidget(QLabel("Headlines (double-click to open)"))
+        rl.setContentsMargins(8, 0, 0, 0)
+        rl.addWidget(section_title("Headlines"))
+        rl.addWidget(help_label("Double-click a headline to open it."))
         self.headlines = QListWidget()
         self.headlines.setWordWrap(True)
         self.headlines.itemDoubleClicked.connect(lambda it: it.data(Qt.UserRole) and webbrowser.open(it.data(Qt.UserRole)))
-        rl.addWidget(self.headlines)
-        w.addWidget(left)
-        w.addWidget(right)
-        w.setSizes([700, 500])
+        rl.addWidget(self.headlines, 1)
+        split.addWidget(left)
+        split.addWidget(right)
+        split.setSizes([700, 500])
+        lay.addWidget(split, 1)
         return w
 
     def _build_smart_money(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
-        info = QLabel("Company insiders (executives, directors) buying their own company's stock on the open "
-                      "market, from SEC Form 4 filings. Multiple insiders buying together is a stronger signal. "
-                      "Insider buying predicts moves over weeks to months, not minutes, so the bot uses it to "
-                      "choose which stocks to WATCH (the top 5 join each scan) and tells the AI about it. "
-                      "Trades still need good intraday signals.")
-        info.setWordWrap(True)
-        info.setStyleSheet(f"color: {MUTED};")
-        lay.addWidget(info)
+        w, lay = page()
+        lay.addWidget(help_label(
+            "Company insiders (executives, directors) buying their own company's stock on the open market, from "
+            "SEC Form 4 filings. Several insiders buying together is a stronger signal. Insider buying plays out "
+            "over weeks to months, which is what the swing strategy trades."))
         self.ins_table = make_table(["Symbol", "Score", "Total bought", "# Insiders", "Who"])
-        lay.addWidget(self.ins_table)
+        lay.addWidget(self.ins_table, 1)
         return w
 
     def _build_journal(self):
-        w = QWidget()
-        lay = QVBoxLayout(w)
+        w, lay = page()
         self.stats_lbl = QLabel()
         self.stats_lbl.setStyleSheet("font-size: 11pt;")
+        self.stats_lbl.setWordWrap(True)
         lay.addWidget(self.stats_lbl)
         self.journal_table = make_table(["Date", "Symbol", "Side", "Shares", "Entry", "Exit", "P&L $", "P&L %",
                                          "Exit reason", "Confidence", "Why it traded"])
-        lay.addWidget(self.journal_table)
+        lay.addWidget(self.journal_table, 1)
         return w
 
     def _build_learning(self):
-        w = QWidget()
-        lay = QHBoxLayout(w)
+        w, lay = page(scroll=True)
+        row = QHBoxLayout()
+        row.setSpacing(12)
         left = QVBoxLayout()
-        left.addWidget(QLabel("Signal weights (learned): higher = trusted more"))
+        left.setSpacing(12)
+        box, bl = card("Signal weights", "Learned from past trades: higher = trusted more.")
         self.weights_table = make_table(["Signal", "Weight"])
-        left.addWidget(self.weights_table)
+        self.weights_table.setMinimumHeight(260)
+        bl.addWidget(self.weights_table)
         self.conf_lbl = QLabel()
-        left.addWidget(self.conf_lbl)
-        self.shadow_lbl = QLabel()
-        self.shadow_lbl.setWordWrap(True)
-        self.shadow_lbl.setStyleSheet(f"color: {MUTED};")
-        left.addWidget(self.shadow_lbl)
-        edge_box = QGroupBox("Edge check: does the bot actually make money after costs?")
-        el = QVBoxLayout(edge_box)
+        self.conf_lbl.setWordWrap(True)
+        bl.addWidget(self.conf_lbl)
+        self.shadow_lbl = help_label("")
+        bl.addWidget(self.shadow_lbl)
+        left.addWidget(box)
+        box, el = card("Edge check: does the bot actually make money after costs?")
         self.edge_lbl = QLabel()
         self.edge_lbl.setWordWrap(True)
         self.edge_lbl.setTextFormat(Qt.RichText)
         el.addWidget(self.edge_lbl)
-        left.addWidget(edge_box)
-        right = QVBoxLayout()
-        right.addWidget(QLabel("Lessons the AI has learned (used in every trade decision)"))
+        left.addWidget(box)
+        left.addStretch()
+        box, rl = card("Lessons the AI has learned", "Used in every trade decision. Select one and click Forget "
+                                                     "to remove it.")
         self.lessons_list = QListWidget()
         self.lessons_list.setWordWrap(True)
-        right.addWidget(self.lessons_list)
+        self.lessons_list.setMinimumHeight(300)
+        rl.addWidget(self.lessons_list, 1)
         forget = QPushButton("Forget selected lesson")
         forget.clicked.connect(self.forget_lesson)
-        right.addWidget(forget)
-        lay.addLayout(left, 1)
-        lay.addLayout(right, 2)
+        rl.addWidget(forget, 0, Qt.AlignLeft)
+        row.addLayout(left, 1)
+        row.addWidget(box, 2)
+        lay.addLayout(row)
         return w
 
-    def _build_settings(self):
-        s = self.ctx.settings
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        w = QWidget()
-        lay = QVBoxLayout(w)
+    # ----------------------------------------------------------------- settings
+    def _settings_page(self, title: str, intro: str | None = None):
+        """One page of the Settings screen: scrollable, standard margins, a heading and optional intro."""
+        w, lay = page(scroll=True)
+        lay.addWidget(section_title(title))
+        if intro:
+            lay.addWidget(help_label(intro))
+        self._settings_pages.append((title, w, lay))
+        return lay
 
-        g = QGroupBox("1. Alpaca broker keys (from alpaca.markets > Paper Trading > API Keys)")
-        f = QFormLayout(g)
+    def _build_settings(self):
+        from PySide6.QtWidgets import QStackedWidget
+        s = self.ctx.settings
+        self._settings_pages = []
+
+        # ---- Broker account
+        lay = self._settings_page("Broker account", "Your Alpaca keys: alpaca.markets > Paper Trading > API Keys. "
+                                  "Paper trading uses fake money; keep it on until the bot has proven itself.")
+        box, f = card("Alpaca keys", layout="form")
         key, secret = config.load_keys()
         self.f_key = QLineEdit(key)
         self.f_secret = QLineEdit(secret)
@@ -353,11 +357,68 @@ class MainWindow(QMainWindow):
         self.f_mode.setCurrentText(s["mode"])
         f.addRow("API Key ID", self.f_key)
         f.addRow("Secret Key", self.f_secret)
-        f.addRow("Mode (paper = fake money)", self.f_mode)
-        lay.addWidget(g)
+        f.addRow("Mode", self.f_mode)
+        f.addRow(help_label("paper = fake money for testing. live = real money (needs your LIVE keys and "
+                                "stays locked until paper trading has shown an edge)."))
+        lay.addWidget(box)
+        lay.addStretch()
 
-        g = QGroupBox("2. Local AI (Ollama)")
-        f = QFormLayout(g)
+        # ---- Strategies
+        lay = self._settings_page("Strategies", "Day trading was removed: every version tested on real data "
+                                  "(chart signals, confirmed gaps, S&P 500 late-day momentum) lost money, most even "
+                                  "before costs. You can still backtest them in the Backtest tab.")
+        sw = s["swing"]
+        self.f_day_note = help_label("")            # kept for compatibility; the note is the page intro
+        self.f_day_note.hide()
+        box, f = card("Swing trading", "Holds positions for days to weeks. See the Swing tab for what it's "
+                                       "doing.", layout="form")
+        self.f_swing_on = QCheckBox("Swing trading on")
+        self.f_swing_on.setChecked(sw["enabled"])
+        self.f_sw_insider = QCheckBox("Insider buying (the tested strategy)")
+        self.f_sw_insider.setChecked(sw["setups"]["insider_buy"])
+        self.f_sw_gap = QCheckBox("Big news jump that held (didn't beat the market in testing)")
+        self.f_sw_gap.setChecked(sw["setups"]["news_gap"])
+        self.f_sw_trend = QCheckBox("Only buy stocks above their 50-day average")
+        self.f_sw_trend.setChecked(sw["require_uptrend"])
+        self.f_sw_ai = QCheckBox("Let the AI read the news and veto candidates")
+        self.f_sw_ai.setChecked(sw["use_ai_review"])
+        self.f_sw_hold = QSpinBox(minimum=2, maximum=120, value=sw["hold_days"], suffix=" trading days")
+        self.f_sw_max = QSpinBox(minimum=1, maximum=30, value=sw["max_positions"])
+        f.addRow("", self.f_swing_on)
+        f.addRow("Setups", self.f_sw_insider)
+        f.addRow("", self.f_sw_gap)
+        f.addRow("Filters", self.f_sw_trend)
+        f.addRow("", self.f_sw_ai)
+        f.addRow("Hold each position for", self.f_sw_hold)
+        f.addRow("Max positions at once", self.f_sw_max)
+        lay.addWidget(box)
+        box, f = card("Cash and crash protection", layout="form")
+        self.f_sw_index = QCheckBox("Keep idle cash in an S&&P 500 fund (SPY)")
+        self.f_sw_index.setChecked(sw["idle_cash_in_index"])
+        self.f_sw_filter = QCheckBox("No new buys while the S&&P 500 is below its 200-day average")
+        self.f_sw_filter.setChecked(sw["market_filter"])
+        self.f_crash = QComboBox()
+        self.f_crash.addItems(["Off", "Step aside: move to cash in a falling market (tested best)",
+                               "Short: switch to an inverse S&P 500 fund (tested WORSE)"])
+        self.f_crash.setCurrentIndex(["off", "step_aside", "short"].index(sw.get("crash_protection", "off")))
+        f.addRow("", self.f_sw_index)
+        f.addRow(help_label("Money not in swing trades sits in SPY. Tested 2019-2026: beat holding the S&P "
+                                "500 alone, BUT the account then rises and falls with the market (about -35% in "
+                                "2020, versus -6% without it)."))
+        f.addRow("", self.f_sw_filter)
+        f.addRow(help_label("Tested: smaller drops in 2019-22, slightly worse in 2023-26."))
+        f.addRow("Crash protection", self.f_crash)
+        f.addRow(help_label("Checked at each month's end: when the S&P 500 closes below its 10-month average, "
+                                "stop buying and hold cash (or an inverse fund). It reacts after prices start "
+                                "falling; it can't see a crash coming. Stepping aside cut the worst drop from about "
+                                "50% to 20% in 1994-2026 tests; shorting did worse than simply holding the index."))
+        lay.addWidget(box)
+        lay.addStretch()
+
+        # ---- Local AI
+        lay = self._settings_page("Local AI", "Eimeria uses a free AI that runs on this PC through Ollama. Test "
+                                  "how well it trades in the AI tab.")
+        box, f = card("Ollama", layout="form")
         self.f_ollama = QLineEdit(s["ai"]["ollama_url"])
         self.f_model = QLineEdit(s["ai"]["model"])
         self.f_require_ai = QCheckBox("Only trade when the AI approves (recommended)")
@@ -365,33 +426,41 @@ class MainWindow(QMainWindow):
         f.addRow("Ollama address", self.f_ollama)
         f.addRow("Model name", self.f_model)
         f.addRow("", self.f_require_ai)
-        lay.addWidget(g)
+        lay.addWidget(box)
+        lay.addStretch()
 
-        g = QGroupBox("3. What to trade")
-        f = QFormLayout(g)
+        # ---- Stocks and data
+        lay = self._settings_page("Stocks and data")
+        box, f = card("What to watch", layout="form")
         self.f_watch = QLineEdit(", ".join(s["watchlist"]))
         self.f_movers = QCheckBox("Also scan today's top movers / most active stocks")
         self.f_movers.setChecked(s["add_top_movers"])
         self.f_short = QCheckBox("Allow short selling (betting on drops; riskier)")
         self.f_short.setChecked(s["allow_short"])
         self.f_interval = QSpinBox(minimum=1, maximum=60, value=s["scan_interval_minutes"], suffix=" min")
-        self.f_sec = QLineEdit(s["smart_money"]["sec_user_agent"])
-        self.f_sec.setPlaceholderText("Your Name your@email.com  (required by the SEC for insider data)")
-        f.addRow("Watchlist (comma separated)", self.f_watch)
+        f.addRow("Watchlist", self.f_watch)
+        f.addRow(help_label("Stock symbols separated by commas, e.g. AAPL, MSFT, NVDA."))
         f.addRow("", self.f_movers)
         f.addRow("", self.f_short)
         f.addRow("Scan every", self.f_interval)
-        f.addRow("SEC contact (insider data)", self.f_sec)
+        lay.addWidget(box)
+        box, f = card("Data sources", layout="form")
+        self.f_sec = QLineEdit(s["smart_money"]["sec_user_agent"])
+        self.f_sec.setPlaceholderText("Your Name your@email.com")
         self.f_feed = QComboBox()
         self.f_feed.addItems(["iex", "sip"])
         self.f_feed.setCurrentText(s["data"]["live_feed"])
-        self.f_feed.setToolTip("iex = free, one exchange only. sip = every exchange; needs Alpaca's paid "
-                               "market data plan (otherwise scans will fail).")
-        f.addRow("Live price data (iex = free, sip = paid)", self.f_feed)
-        lay.addWidget(g)
+        f.addRow("SEC contact", self.f_sec)
+        f.addRow(help_label("Your name and email. The SEC requires it to download insider and earnings data "
+                                "(needed by the swing strategy)."))
+        f.addRow("Live price data", self.f_feed)
+        f.addRow(help_label("iex = free, one exchange only. sip = every exchange; needs Alpaca's paid market "
+                                "data plan (otherwise scans fail)."))
+        lay.addWidget(box)
+        lay.addStretch()
 
-        g = QGroupBox("4. Risk limits (the bot can never change these)")
-        f = QFormLayout(g)
+        # ---- Risk limits
+        lay = self._settings_page("Risk limits", "Hard limits the bot can never change by itself.")
         r = s["risk"]
 
         def pct(v, mx=100.0):
@@ -408,96 +477,54 @@ class MainWindow(QMainWindow):
         self.f_conf = QDoubleSpinBox(minimum=0.3, maximum=0.99, decimals=2, value=r["min_confidence"], singleStep=0.05)
         self.f_pdt = QCheckBox("Pattern-day-trader protection for accounts under $25,000")
         self.f_pdt.setChecked(r["pdt_protection"])
-        f.addRow("Max size of one position (% of account)", self.f_maxpos)
-        f.addRow("Max loss per trade (% of account)", self.f_risk)
+        self.f_gate = QCheckBox("Lock real-money trading until the bot has proven an edge")
+        self.f_gate.setChecked(s["edge_gate"]["enabled"])
+        box, f = card("Per trade", layout="form")
+        f.addRow("Max size of one position", self.f_maxpos)
+        f.addRow("Max loss per trade", self.f_risk)
+        f.addRow(help_label("Both as % of the account."))
         f.addRow("Stop-loss distance", self.f_stop)
         f.addRow("Take-profit = stop distance x", self.f_rr)
-        f.addRow("Stop trading for the day after losing", self.f_maxdl)
+        f.addRow("Min AI confidence (0-1)", self.f_conf)
+        lay.addWidget(box)
+        box, f = card("Per day and overall", layout="form")
+        f.addRow("Stop for the day after losing", self.f_maxdl)
         f.addRow("Max open positions", self.f_maxopen)
         f.addRow("Max trades per day", self.f_maxtrades)
-        f.addRow("Min AI confidence to trade (0-1)", self.f_conf)
         f.addRow("", self.f_pdt)
-        self.f_gate = QCheckBox("Lock real-money trading until the bot has proven an edge (Learning tab)")
-        self.f_gate.setChecked(s["edge_gate"]["enabled"])
         f.addRow("", self.f_gate)
-        lay.addWidget(g)
+        f.addRow(help_label("The lock's progress is shown in the Learning tab. Removing it asks you to type "
+                                "a confirmation."))
+        lay.addWidget(box)
+        lay.addStretch()
 
-        g = QGroupBox("Strategies")
-        f = QFormLayout(g)
-        sw = s["swing"]
-        self.f_day_note = QLabel("Day trading was removed: every version tested on real data (chart signals, "
-                                 "confirmed gaps, S&P 500 late-day momentum) lost money, most even before costs. "
-                                 "You can still backtest them in the Backtest tab.")
-        self.f_day_note.setWordWrap(True)
-        self.f_day_note.setStyleSheet(f"color: {MUTED};")
-        self.f_swing_on = QCheckBox("Swing trading: hold for days to weeks (see the Swing tab)")
-        self.f_swing_on.setChecked(sw["enabled"])
-        self.f_sw_insider = QCheckBox("Setup: insider buying")
-        self.f_sw_insider.setChecked(sw["setups"]["insider_buy"])
-        self.f_sw_gap = QCheckBox("Setup: big news jump that held (gap up on heavy volume)")
-        self.f_sw_gap.setChecked(sw["setups"]["news_gap"])
-        self.f_sw_trend = QCheckBox("Only buy stocks above their 50-day average (uptrend)")
-        self.f_sw_trend.setChecked(sw["require_uptrend"])
-        self.f_sw_ai = QCheckBox("Let the AI read the news and veto swing candidates")
-        self.f_sw_ai.setChecked(sw["use_ai_review"])
-        self.f_sw_index = QCheckBox("Keep idle cash in an S&&P 500 fund (SPY) instead of cash")
-        self.f_sw_index.setChecked(sw["idle_cash_in_index"])
-        self.f_sw_index.setToolTip(
-            "Money not in swing trades is held in SPY and sold when a swing trade needs it.\n"
-            "Tested 2019-2026: beat holding the S&P 500 alone in both 2019-22 and 2023-26, BUT the account\n"
-            "then rises and falls with the market (worst drop -35% in 2020 vs -6% without it).")
-        self.f_sw_filter = QCheckBox("Market filter: no new swing buys while the S&&P 500 is below its 200-day average")
-        self.f_sw_filter.setChecked(sw["market_filter"])
-        self.f_sw_filter.setToolTip("Tested: helped in 2019-22 (smaller drops), slightly hurt in 2023-26.")
-        self.f_crash = QComboBox()
-        self.f_crash.addItems(["Off", "Step aside: move to cash in a falling market (tested best)",
-                               "Short: switch to an inverse S&P 500 fund (tested WORSE)"])
-        self.f_crash.setCurrentIndex(["off", "step_aside", "short"].index(sw.get("crash_protection", "off")))
-        self.f_crash.setToolTip(
-            "Checked at each month's end: if the S&P 500 closed below its 10-month average, stop buying, sell the\n"
-            "S&P 500 fund (if held), and either hold cash or an inverse fund (SH) until it closes a month back above.\n"
-            "1994-2026 tests: stepping aside cut the worst drop from ~50% to ~20%, but lagged strong bull markets.\n"
-            "Shorting made money in crashes but lost more in the rebounds: worse than holding the index overall.\n"
-            "It reacts AFTER prices start falling; it can't see a crash coming.")
-        self.f_sw_hold = QSpinBox(minimum=2, maximum=120, value=sw["hold_days"], suffix=" trading days")
-        self.f_sw_max = QSpinBox(minimum=1, maximum=30, value=sw["max_positions"])
-        f.addRow("", self.f_day_note)
-        f.addRow("", self.f_swing_on)
-        f.addRow("", self.f_sw_insider)
-        f.addRow("", self.f_sw_gap)
-        f.addRow("", self.f_sw_trend)
-        f.addRow("", self.f_sw_ai)
-        f.addRow("", self.f_sw_index)
-        f.addRow("", self.f_sw_filter)
-        f.addRow("Crash protection", self.f_crash)
-        f.addRow("Swing: hold for", self.f_sw_hold)
-        f.addRow("Swing: max positions", self.f_sw_max)
-        lay.insertWidget(1, g)
-
-        g = QGroupBox("5. Smarter exits and market filter")
-        f = QFormLayout(g)
+        # ---- Exits
+        lay = self._settings_page("Exits and market filter")
         x = s["exits"]
+        box, f = card("How trades are closed", layout="form")
         self.f_partial = QCheckBox("Take half profit at 1x the stop distance, then move the stop to break-even")
         self.f_partial.setChecked(x["partial_enabled"])
         self.f_trail = QCheckBox("Then trail the stop behind the price")
         self.f_trail.setChecked(x["trailing_enabled"])
         self.f_timestop = QSpinBox(minimum=0, maximum=390, value=x["time_stop_minutes"], suffix=" min")
-        self.f_timestop.setToolTip("Close a trade that hasn't moved after this long (0 = off)")
         self.f_regime = QCheckBox("Be pickier when the whole market is falling; no new buys in a selloff")
         self.f_regime.setChecked(s["market_filter"]["enabled"])
         f.addRow("", self.f_partial)
         f.addRow("", self.f_trail)
-        f.addRow("Time stop (close trades going nowhere after)", self.f_timestop)
+        f.addRow("Time stop", self.f_timestop)
+        f.addRow(help_label("Close a trade that hasn't moved after this long (0 = off)."))
         f.addRow("", self.f_regime)
-        lay.addWidget(g)
+        lay.addWidget(box)
+        lay.addStretch()
 
-        g = QGroupBox("6. Alerts")
-        f = QFormLayout(g)
+        # ---- Alerts
+        lay = self._settings_page("Alerts")
         al = s["alerts"]
+        box, f = card("Notifications", layout="form")
         self.f_desktop = QCheckBox("Windows pop-up notifications")
         self.f_desktop.setChecked(al["desktop"])
         self.f_ntfy = QLineEdit(al["ntfy_topic"])
-        self.f_ntfy.setPlaceholderText("Optional: a long random name, e.g. eimeria-7f3k9q2x (see README)")
+        self.f_ntfy.setPlaceholderText("e.g. eimeria-7f3k9q2x")
         self.f_on_trade = QCheckBox("Trades")
         self.f_on_trade.setChecked(al["on_trade"])
         self.f_on_problem = QCheckBox("Problems (loss limit, errors, missing stop-loss)")
@@ -508,18 +535,21 @@ class MainWindow(QMainWindow):
         test.clicked.connect(self.test_alert)
         f.addRow("", self.f_desktop)
         f.addRow("Phone alerts (ntfy topic)", self.f_ntfy)
+        f.addRow(help_label("Optional. Use a long random name: anyone who knows it can read your alerts "
+                                "(see the README)."))
         f.addRow("Alert me about", self.f_on_trade)
         f.addRow("", self.f_on_problem)
         f.addRow("", self.f_on_report)
         f.addRow("", test)
-        lay.addWidget(g)
+        lay.addWidget(box)
+        lay.addStretch()
 
-        g = QGroupBox("Updates")
-        f = QFormLayout(g)
+        # ---- Updates
+        lay = self._settings_page("Updates")
         from ..version import VERSION
+        box, f = card("Eimeria updates", layout="form")
         f.addRow("Installed version", QLabel(VERSION))
         self.f_upd_repo = QLineEdit(s.get("updates", {}).get("repo", ""))
-        self.f_upd_repo.setToolTip("GitHub repository that publishes Eimeria updates (owner/name)")
         self.f_upd_auto = QCheckBox("Check for updates when Eimeria starts (and every 6 hours)")
         self.f_upd_auto.setChecked(s.get("updates", {}).get("check_on_start", True))
         row = QHBoxLayout()
@@ -531,17 +561,47 @@ class MainWindow(QMainWindow):
         row.addWidget(rb)
         row.addStretch()
         f.addRow("Update source", self.f_upd_repo)
+        f.addRow(help_label("The GitHub repository that publishes updates (owner/name)."))
         f.addRow("", self.f_upd_auto)
         f.addRow("", row)
-        lay.addWidget(g)
+        lay.addWidget(box)
+        lay.addStretch()
 
+        # ---- assemble: navigation on the left, the selected page on the right, Save always visible
+        outer = QWidget()
+        ol = QVBoxLayout(outer)
+        ol.setContentsMargins(12, 12, 12, 12)
+        ol.setSpacing(10)
+        body = QHBoxLayout()
+        body.setSpacing(12)
+        nav = QListWidget()
+        nav.setObjectName("nav")
+        nav.setFixedWidth(210)
+        stack = QStackedWidget()
+        for title, w, _ in self._settings_pages:
+            nav.addItem(title)
+            stack.addWidget(w)
+        nav.currentRowChanged.connect(stack.setCurrentIndex)
+        nav.setCurrentRow(0)
+        body.addWidget(nav)
+        body.addWidget(stack, 1)
+        ol.addLayout(body, 1)
+        bar = QHBoxLayout()
         save = QPushButton("Save settings")
         save.setObjectName("start")
         save.clicked.connect(self.save_settings)
-        lay.addWidget(save)
-        lay.addStretch()
-        scroll.setWidget(w)
-        return scroll
+        bar.addWidget(help_label("Changes on every page take effect when you click Save. Stop the bot first."), 1)
+        bar.addWidget(save)
+        ol.addLayout(bar)
+        self.settings_nav = nav
+        return outer
+
+    def show_settings(self, page: str = "Broker account"):
+        """Open the Settings tab on one of its pages."""
+        self.tabs.setCurrentIndex(self.tabs.count() - 1)
+        titles = [t for t, _, _ in self._settings_pages]
+        if page in titles:
+            self.settings_nav.setCurrentRow(titles.index(page))
 
     # ================================================================= actions
     def connect_broker(self):
@@ -550,7 +610,7 @@ class MainWindow(QMainWindow):
         except Exception as e:
             self.engine = None
             self.log(f"Not connected: {e}", logging.WARNING)
-            self.tabs.setCurrentIndex(self.tabs.count() - 1)
+            self.show_settings("Broker account")
             from ..broker import diagnose_keys, is_auth_error
             if is_auth_error(e):
                 key, secret = config.load_keys()

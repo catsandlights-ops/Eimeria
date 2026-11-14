@@ -8,11 +8,12 @@ from datetime import date, timedelta
 
 from PySide6.QtCore import QDate, QObject, Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDateEdit, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
+    QComboBox, QDateEdit, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPlainTextEdit, QPushButton,
     QSpinBox, QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .. import config
+from .ui import form
 from ..ai_eval import build_cases, default_cutoff, run_ai_test, verdict
 
 
@@ -29,7 +30,11 @@ class AITab(QWidget):
         self.bridge = _Bridge()
         self.bridge.progress.connect(lambda m: self.test_status.setText(m))
         self.bridge.done.connect(self._on_done)
-        lay = QVBoxLayout(self)
+        from .ui import page
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        area, lay = page(scroll=True)                 # scrolls, so the result tables always get room
+        outer.addWidget(area)
 
         box = QGroupBox("Your local AI")
         bl = QVBoxLayout(box)
@@ -48,8 +53,12 @@ class AITab(QWidget):
         bl.addLayout(row)
         lay.addWidget(box)
 
-        box = QGroupBox("Test the AI: does its swing veto actually help?")
+        box = QWidget()
         tl = QVBoxLayout(box)
+        tl.setContentsMargins(12, 12, 12, 12)
+        tl.setSpacing(10)
+        from .ui import section_title
+        tl.addWidget(section_title("Does the AI's swing veto actually help?"))
         info = QLabel(
             "Replays past swing signals through the AI exactly as the bot would have seen them (only the headlines "
             "published before 4:20 PM that day, from Alpaca's news archive), then checks how each stock did over "
@@ -58,9 +67,9 @@ class AITab(QWidget):
             "the cutoff date below are used: check each model's release date on ollama.com and set it later than "
             "that. Several models can be compared on the same signals (comma-separated).")
         info.setWordWrap(True)
-        info.setStyleSheet(f"color: {MUTED};")
+        info.setObjectName("help")
         tl.addWidget(info)
-        f = QFormLayout()
+        f = form()
         self.models = QLineEdit(window.ctx.settings["ai"]["model"])
         c = default_cutoff()
         self.cutoff = QDateEdit(QDate(c.year, c.month, c.day), calendarPopup=True)
@@ -89,12 +98,16 @@ class AITab(QWidget):
         self.result_table.setToolTip("Double-click a model to make it Eimeria's AI model")
         self.result_table.cellDoubleClicked.connect(self.use_model)
         self.examples = make_table(["Date", "Symbol", "AI", "Reason", "Headlines", "Result vs S&P (holding period)"])
+        self.result_table.setMinimumHeight(120)
+        self.examples.setMinimumHeight(260)
         split.addWidget(self.result_table)
         split.addWidget(self.examples)
+        split.setMinimumHeight(420)
         tl.addWidget(split, 1)
         tests = QTabWidget()
+        tests.addTab(self._trader_box(MUTED, make_table), "AI trader test (buy or short on news)")
         tests.addTab(box, "Swing veto test")
-        tests.addTab(self._trader_box(MUTED, make_table), "AI trader test (long or short on news)")
+        tests.setMinimumHeight(820)
         lay.addWidget(tests, 1)
         self.refresh()
 
@@ -103,19 +116,23 @@ class AITab(QWidget):
         self.tbridge = _Bridge()
         self.tbridge.progress.connect(lambda m: self.t_status.setText(m))
         self.tbridge.done.connect(self._trader_done)
+        from .ui import section_title
         w = QWidget()
         tl = QVBoxLayout(w)
+        tl.setContentsMargins(12, 12, 12, 12)
+        tl.setSpacing(10)
+        tl.addWidget(section_title("Can the AI make money trading the news, long or short?"))
         info = QLabel(
-            "Can your AI make money by reading the news and choosing to BUY or SHORT? For random past days after "
+            "For random past days after "
             "the AI's training cutoff, it reads each company's headlines from yesterday's close to 9:20 AM (only "
             "news that existed then) and answers buy, short or skip. Buys are bought at the open and sold at the "
             "close; shorts the opposite. Results are vs the S&P 500 over the same hours, after costs. Rules are "
             "fixed in advance: it PASSES only if its trades make money in both halves of the period. Expect about "
             "5-15 seconds per answer on a typical PC (300 answers: roughly 30-60 minutes).")
         info.setWordWrap(True)
-        info.setStyleSheet(f"color: {muted};")
+        info.setObjectName("help")
         tl.addWidget(info)
-        f = QFormLayout()
+        f = form()
         c = default_cutoff()
         self.t_cutoff = QDateEdit(QDate(c.year, c.month, c.day), calendarPopup=True)
         y = date.today() - timedelta(days=7)
@@ -154,14 +171,18 @@ class AITab(QWidget):
         self.t_verdict = QPlainTextEdit()
         self.t_verdict.setReadOnly(True)
         self.t_verdict.setMaximumHeight(110)
+        self.t_verdict.setPlaceholderText("Run the test to see the PASS / FAIL verdict here.")
         tl.addWidget(self.t_verdict)
         split = QSplitter(Qt.Vertical)
         self.t_table = make_table(["Rule", "Trade", "1st half: avg vs S&P after costs", "count",
                                    "2nd half: avg vs S&P after costs", "count", "Edge?"])
         self.t_examples = make_table(["Date", "Symbol", "AI", "Confidence", "Reason", "Headlines",
                                       "Stock vs S&P that day"])
+        self.t_table.setMinimumHeight(190)
+        self.t_examples.setMinimumHeight(260)
         split.addWidget(self.t_table)
         split.addWidget(self.t_examples)
+        split.setMinimumHeight(470)
         tl.addWidget(split, 1)
         return w
 

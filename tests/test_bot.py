@@ -1907,3 +1907,36 @@ def test_history_universe_includes_fallen_and_delisted_stocks():
     px, info = history_universe(B(data), s, 20e6, date(2019, 1, 2), date(2026, 10, 30))
     assert set(info["symbols"]) == {a, b, c} and info["delisted_kept"] == 1
     assert set(px) == {a, b, c} and str(px[a]["close"].dtype) == "float32"
+
+
+def test_mouse_wheel_never_changes_settings():
+    import os
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication, QComboBox, QSpinBox
+    from app.gui.ui import install_wheel_guard, page
+    app = QApplication.instance() or QApplication([])
+    guard = install_wheel_guard(app)
+    try:
+        area, lay = page(scroll=True)
+        spin = QSpinBox(minimum=0, maximum=100, value=50)
+        combo = QComboBox()
+        combo.addItems(["a", "b", "c"])
+        lay.addWidget(spin)
+        lay.addWidget(combo)
+        lay.addSpacing(3000)                                   # tall page, so it can scroll
+        area.resize(400, 300)
+        area.show()
+        app.processEvents()
+
+        def wheel(w, dy):
+            ev = QWheelEvent(QPointF(5, 5), QPointF(5, 5), QPoint(0, 0), QPoint(0, dy), Qt.NoButton,
+                             Qt.NoModifier, Qt.NoScrollPhase, False)
+            app.sendEvent(w, ev)
+        wheel(spin, -120)
+        wheel(combo, -120)
+        assert spin.value() == 50 and combo.currentIndex() == 0      # values unchanged ...
+        assert area.verticalScrollBar().value() > 0                  # ... the page scrolled instead
+    finally:
+        app.removeEventFilter(guard)
