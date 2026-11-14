@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 (2026-11-14)
+- New look: every screen uses the same spacing, panels and text styles, with more room and clearer headings.
+- Settings is split into pages (Broker account, Strategies, Local AI, Stocks and data, Risk limits, Exits, Alerts, Updates) with a sidebar, and the Save button is always visible.
+- Scrolling with the mouse wheel never changes a setting by accident: over a number box or drop-down, the page scrolls instead. Click a box and type, or use its arrows, to change it.
+- Backtest tab: each strategy has a short description, and only the settings that apply to it are shown. AI tab: the AI trader test (buy or short on news) comes first and its results have more room.
+
 ## 0.4.4 (2026-11-14)
 - Fairer stock lists for the momentum and earnings tests: every stock that traded enough in ANY year of the test, including companies that were later delisted, instead of only the stocks that trade today. Before, the tests only saw the survivors, which made results look better than they were. The first run downloads more data and takes longer.
 
